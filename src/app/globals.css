@@ -1,0 +1,247 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens — "Linen terminal": warm linen paper, ink, mono data, ASCII
+   accents, soft blurred auras. Change the look here; components use tokens only.
+   --------------------------------------------------------------------------- */
+:root {
+  --linen: #efede4;
+  --linen-deep: #e6e2d5;
+  --paper: #f7f5ee;
+  --card: #fffdf8;
+  --ink: #1d1a15;
+  --ink-2: #4a453c;
+  --ink-3: #847e70;
+  --rule: #d9d4c5;
+  --rule-strong: #bdb6a4;
+
+  /* semantic data colours (never the only signal: always paired with text/glyphs) */
+  --kcal: #d9541a;
+  --protein: #2f57c9;
+  --fat: #b8861a;
+  --carbs: #6b7d33;
+  --ok: #33704a;
+  --warn: #b0561d;
+  --over: #9e3427;
+
+  --aura-1: #f6c3a2;
+  --aura-2: #aac3f2;
+  --aura-3: #f3dc98;
+
+  --radius-sm: 10px;
+  --radius: 18px;
+  --radius-lg: 28px;
+  --shadow-card: 0 1px 0 rgb(29 26 21 / 0.04), 0 8px 24px -12px rgb(29 26 21 / 0.18);
+  --shadow-float: 0 18px 40px -16px rgb(29 26 21 / 0.45);
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.1875rem;
+  --text-display: clamp(2rem, 1.5rem + 2.5vw, 2.75rem);
+  --text-numeral: clamp(3rem, 2.2rem + 4vw, 4.25rem);
+
+  --duration-fast: 140ms;
+  --duration: 260ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --nav-h: 76px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+@theme inline {
+  --color-linen: var(--linen);
+  --color-linen-deep: var(--linen-deep);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-kcal: var(--kcal);
+  --color-protein: var(--protein);
+  --color-fat: var(--fat);
+  --color-carbs: var(--carbs);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-over: var(--over);
+  --font-display: var(--font-literata), ui-serif, Georgia, serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  /* SF Pro on iPhone: native, zero download, best Cyrillic rendering at UI sizes */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --radius-card: var(--radius);
+  --radius-pill: 999px;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  background: var(--linen);
+}
+
+body {
+  background: var(--linen);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* Paper grain: an SVG noise texture fixed above the page, below interactive UI. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.38;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.11 0 0 0 0 0.1 0 0 0 0 0.08 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: var(--aura-3);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-variant-numeric: lining-nums;
+  letter-spacing: -0.015em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small caps-like mono labels (ASCII character of the UI) */
+.label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ascii {
+  font-family: var(--font-mono);
+  white-space: pre;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+/* Hairline rule made of characters: · · · · */
+.dotrule {
+  height: 1px;
+  background-image: radial-gradient(circle, var(--rule-strong) 1px, transparent 1.2px);
+  background-size: 6px 1px;
+  background-repeat: repeat-x;
+}
+
+/* Card surfaces */
+.surface {
+  position: relative;
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--rule) 70%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+/* Corner ticks like a printed frame: ┌ ┐ └ ┘ */
+.framed {
+  position: relative;
+}
+.framed::before,
+.framed::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--ink-3);
+  border-style: solid;
+  pointer-events: none;
+}
+.framed::before {
+  top: 8px;
+  left: 8px;
+  border-width: 1px 0 0 1px;
+}
+.framed::after {
+  bottom: 8px;
+  right: 8px;
+  border-width: 0 1px 1px 0;
+}
+
+/* Soft blurred aura behind hero content (UI-details reference). */
+.aura {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 140%;
+  pointer-events: none;
+  filter: blur(36px) saturate(1.1);
+  opacity: 0.75;
+  background:
+    radial-gradient(40% 45% at 18% 30%, var(--aura-1), transparent 70%),
+    radial-gradient(38% 42% at 82% 22%, var(--aura-2), transparent 70%),
+    radial-gradient(45% 40% at 60% 85%, var(--aura-3), transparent 70%);
+  animation: aura-drift 18s var(--ease-out-expo) infinite alternate;
+}
+
+@keyframes aura-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(2%, -3%, 0) scale(1.06); }
+}
+
+/* Press feedback for every tappable element */
+.press {
+  transition: transform var(--duration-fast) var(--ease-out-expo), background-color var(--duration-fast), opacity var(--duration-fast);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+.sheet-enter {
+  animation: sheet-in var(--duration) var(--ease-out-expo);
+}
+@keyframes sheet-in {
+  from { transform: translate3d(0, 24px, 0); opacity: 0; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in var(--duration) var(--ease-out-expo);
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+.blink::after {
+  content: "▍";
+  animation: blink 1s steps(2) infinite;
+  margin-left: 2px;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

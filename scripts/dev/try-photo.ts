@@ -1,0 +1,22 @@
+import { createClient } from '@supabase/supabase-js';
+import { readFileSync } from 'node:fs';
+import { recognizePhoto } from '@/lib/recognition/pipeline';
+
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
+const [email, passFile, imgPath] = process.argv.slice(2);
+const anon = createClient(url, key, { auth: { persistSession: false } });
+const { data: auth, error } = await anon.auth.signInWithPassword({ email, password: readFileSync(passFile, 'utf8').trim() });
+if (error) throw error;
+const sb = createClient(url, key, { auth: { persistSession: false }, global: { headers: { Authorization: `Bearer ${auth.session!.access_token}` } } });
+const uid = auth.user!.id;
+const bytes = readFileSync(imgPath);
+const path = `${uid}/photo/test/${crypto.randomUUID()}.png`;
+const up = await sb.storage.from('media').upload(path, bytes, { contentType: 'image/png' });
+if (up.error) throw up.error;
+const { data: m } = await sb.from('media').insert({ user_id: uid, kind: 'photo', path, mime: 'image/png', bytes: bytes.length }).select('id').single();
+const t0 = Date.now();
+const r = await recognizePhoto({ sb, userId: uid, images: [{ data: new Uint8Array(bytes), mime: 'image/png' }], mediaIds: [m!.id], hints: { mode: 'plate' } });
+console.log(`${Date.now() - t0}ms models=${r.models.join(',')} conf=${r.confidence} recognition=${r.recognitionId ? 'saved' : 'NOT saved'}`);
+for (const it of r.items) console.log(`  - ${it.name} ${it.grams}г (${it.grams_low}–${it.grams_high}) → ${it.kcal} ккал conf=${it.confidence}${it.unmatched ? ' UNMATCHED' : ''}`);
+for (const q of r.questions) console.log(`  ? ${q.text} [${q.options.map((o) => o.label).join(' | ')}]`);

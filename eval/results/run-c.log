@@ -1,0 +1,60 @@
+eval: source=n5k dishes=20 provider=workers-ai models=@cf/mistralai/mistral-small-3.1-24b-instruct
+dish_1558113941: truth 297 kcal / pred 298 (conf 0.85)
+dish_1558461607: truth 88 kcal / pred 104 (conf 0.90)
+dish_1556575327: truth 103 kcal / pred 179 (conf 0.90)
+dish_1558639876: truth 68 kcal / pred 72 (conf 0.90)
+dish_1560203400: truth 293 kcal / pred 594 (conf 0.90)
+dish_1560526447: truth 89 kcal / pred 40 (conf 0.90)
+dish_1562008936: truth 58 kcal / pred 480 (conf 0.90)
+dish_1559239369: truth 131 kcal / pred 87 (conf 0.90)
+dish_1561654392: truth 494 kcal / pred 507 (conf 0.83)
+dish_1561148021: truth 362 kcal / pred 478 (conf 0.80)
+dish_1563305513: truth 606 kcal / pred 945 (conf 0.90)
+dish_1563897981: truth 244 kcal / pred 665 (conf 0.90)
+dish_1564160043: truth 245 kcal / pred 0 (conf 0.90)
+dish_1562788568: truth 289 kcal / pred 247 (conf 0.83)
+dish_1562690950: truth 109 kcal / pred 205 (conf 0.90)
+dish_1565117429: truth 391 kcal / pred 540 (conf 0.90)
+dish_1564773847: truth 238 kcal / pred 281 (conf 0.85)
+dish_1565894889: truth 258 kcal / pred 405 (conf 0.90)
+dish_1566838317: truth 114 kcal / pred 111 (conf 0.90)
+dish_1566328805: truth 928 kcal / pred 427 (conf 0.85)
+{
+  "n": 20,
+  "ok": 20,
+  "failed": 0,
+  "mae_kcal": 151,
+  "mape_kcal": 83,
+  "mae_over_mean_pct": 56,
+  "mae_protein": 8.3,
+  "mae_fat": 9.4,
+  "mae_carbs": 16.4,
+  "mae_mass": 76,
+  "mape_mass": 49,
+  "mean_truth_kcal": 270,
+  "avg_latency_ms": 14291,
+  "unmatched_items": 5,
+  "calibration": [
+    {
+      "bin": "0–0.4",
+      "n": 0,
+      "mape_kcal": null
+    },
+    {
+      "bin": "0.4–0.6",
+      "n": 0,
+      "mape_kcal": null
+    },
+    {
+      "bin": "0.6–0.8",
+      "n": 0,
+      "mape_kcal": null
+    },
+    {
+      "bin": "0.8–1",
+      "n": 20,
+      "mape_kcal": 83
+    }
+  ],
+  "corr_conf_vs_abs_err": 0.25
+}

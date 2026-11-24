@@ -1,0 +1,139 @@
+{
+  "display_name": "Имя",
+  "height_cm": 178,
+  "sex": "male",
+  "birth_year": 2000,
+  "timezone": "Asia/Almaty",
+  "day_boundary_minutes": 240,
+  "quiet_start": "23:00",
+  "quiet_end": "08:00",
+  "training": { "days": [1, 3, 5], "start": "18:00", "end": "19:30" },
+  "dislikes": ["что не ешь"],
+  "budget_notes": "ограничения по бюджету, где обычно покупаешь продукты",
+  "goals": [
+    {
+      "name": "Базовая цель",
+      "kind": "phase",
+      "kcal_min": 2000,
+      "kcal_max": 2200,
+      "kcal_floor": 1500,
+      "protein_min_g": 130,
+      "protein_max_g": 160,
+      "fat_min_g": 55,
+      "fat_max_g": 80,
+      "carbs_min_g": 180,
+      "carbs_max_g": 260,
+      "steps_min": 8000,
+      "steps_max": 12000,
+      "sleep_min_h": 7,
+      "success_criteria": "Всё записано, белок добран, калории в коридоре",
+      "notes": "Пример: поправь цифры под себя в Настройках."
+    }
+  ],
+  "checklist": [
+    { "key": "weigh", "label": "Взвешивание натощак", "due_time": "08:30" },
+    { "key": "breakfast", "label": "Завтрак", "due_time": "09:00" },
+    { "key": "lunch", "label": "Обед", "due_time": "13:30" },
+    { "key": "workout", "label": "Тренировка", "due_time": "18:00", "training_day_only": true },
+    { "key": "protein", "label": "Протеин", "due_time": "20:00" },
+    { "key": "dinner", "label": "Ужин", "due_time": "20:30" },
+    { "key": "steps", "label": "Шаги", "kind": "number", "unit": "шаг", "target": 10000 },
+    { "key": "sleep", "label": "Сон", "kind": "number", "unit": "ч", "target": 7 },
+    { "key": "close_day", "label": "Итог дня записан", "due_time": "22:30" }
+  ],
+  "templates": [
+    {
+      "key": "breakfast", "name": "Завтрак: яйца и овсянка", "slot": "breakfast", "default_time": "09:00",
+      "checklist_key": "breakfast", "glyph": "◐",
+      "items": [
+        { "source": "usda_sr", "ref": "01123", "grams": 104, "note": "2 яйца" },
+        { "source": "usda_sr", "ref": "08120", "grams": 50, "note": "на воде" }
+      ]
+    },
+    {
+      "key": "lunch", "name": "Обед: курица, гречка, салат", "slot": "lunch", "default_time": "13:30",
+      "checklist_key": "lunch", "glyph": "●",
+      "items": [
+        { "source": "usda_sr", "ref": "05062", "grams": 150, "note": "сырой вес" },
+        { "source": "usda_sr", "ref": "20010", "grams": 60, "note": "сухой вес" },
+        { "source": "seed", "ref": "seed:cabbage_carrot", "grams": 200 }
+      ]
+    },
+    {
+      "key": "protein", "name": "Протеин", "slot": "shake", "default_time": "20:00",
+      "checklist_key": "protein", "glyph": "◇",
+      "items": [{ "source": "seed", "ref": "seed:whey_generic", "grams": 30, "note": "1 скуп" }]
+    },
+    {
+      "key": "dinner", "name": "Ужин: курица и овощи", "slot": "dinner", "default_time": "20:30",
+      "checklist_key": "dinner", "glyph": "◑",
+      "items": [
+        { "source": "usda_sr", "ref": "05062", "grams": 150, "note": "сырой вес" },
+        { "source": "seed", "ref": "seed:veg_mix_lowstarch", "grams": 300 },
+        { "source": "usda_sr", "ref": "04584", "grams": 5, "note": "1 ч.л." }
+      ]
+    },
+    {
+      "key": "tvorog", "name": "Творог 2%, 180 г", "slot": "snack", "default_time": null, "glyph": "+",
+      "items": [{ "source": "ru_table", "ref": "ru:tvorog_2", "grams": 180 }]
+    }
+  ],
+  "reminders": [
+    {
+      "key": "breakfast", "title": "Завтрак", "kind": "schedule", "at_time": "09:00", "window_minutes": 40,
+      "condition": { "fact": "logged_slot.breakfast", "op": "eq", "value": false },
+      "template": "Завтрак был? Запиши шаблоном в один тап.", "priority": 3, "cooldown_minutes": 60,
+      "deep_link": "/?focus=breakfast"
+    },
+    {
+      "key": "lunch", "title": "Обед", "kind": "schedule", "at_time": "13:30", "window_minutes": 40,
+      "condition": { "fact": "logged_slot.lunch", "op": "eq", "value": false },
+      "template": "Обед по плану? Отметь, когда поешь.", "priority": 3, "cooldown_minutes": 90,
+      "deep_link": "/?focus=lunch"
+    },
+    {
+      "key": "no_logs_15", "title": "Нет записей до 15:00", "kind": "context", "at_time": "15:00", "window_minutes": 90,
+      "condition": { "fact": "meals_count", "op": "eq", "value": 0 },
+      "template": "Пока ни одной записи за сегодня. Что уже было? Можно задним числом — шаблоном в один тап.",
+      "priority": 4, "cooldown_minutes": 240, "deep_link": "/log"
+    },
+    {
+      "key": "post_workout_protein", "title": "Протеин после тренировки", "kind": "context", "at_time": null,
+      "window_minutes": 0, "training_days_only": true,
+      "condition": { "all": [
+        { "fact": "minutes_since_workout_end", "op": "between", "value": [30, 50] },
+        { "fact": "checked.protein", "op": "eq", "value": false }
+      ] },
+      "template": "После тренировки прошло полчаса — самое время для протеина.", "priority": 4,
+      "cooldown_minutes": 180, "deep_link": "/?focus=protein"
+    },
+    {
+      "key": "evening_checkin", "title": "Вечерняя проверка агента", "kind": "agent", "at_time": "19:00",
+      "window_minutes": 60, "condition": {}, "template": "Как день? Если что-то не записано — скажи, добавлю.",
+      "compose_with_llm": true, "skill_key": "proactive_checkin", "priority": 2, "cooldown_minutes": 180,
+      "deep_link": "/coach"
+    },
+    {
+      "key": "dinner", "title": "Ужин", "kind": "schedule", "at_time": "20:30", "window_minutes": 40,
+      "condition": { "fact": "logged_slot.dinner", "op": "eq", "value": false },
+      "template": "Ужин записан? Если нет — шаблоном в один тап.", "priority": 3, "cooldown_minutes": 90,
+      "deep_link": "/?focus=dinner"
+    },
+    {
+      "key": "protein_gap_21", "title": "Белок к 21:00", "kind": "context", "at_time": "21:00", "window_minutes": 30,
+      "condition": { "fact": "protein_remaining", "op": "gt", "value": 40 },
+      "template": "До цели по белку ещё {protein_remaining} г. Подберу, чем добрать?", "compose_with_llm": true,
+      "skill_key": "whats_to_eat_now", "priority": 4, "cooldown_minutes": 240, "deep_link": "/coach"
+    },
+    {
+      "key": "close_day", "title": "Закрыть день", "kind": "schedule", "at_time": "22:30", "window_minutes": 30,
+      "condition": { "fact": "checked.close_day", "op": "eq", "value": false },
+      "template": "Закроем день? Проверь, всё ли записано — 30 секунд.", "compose_with_llm": true,
+      "skill_key": "close_day", "priority": 3, "cooldown_minutes": 120, "deep_link": "/coach?skill=close_day"
+    }
+  ],
+  "memories": [
+    { "kind": "fact", "content": "Пример: рост ~178 см, вес ~85 кг (оценка).", "tags": ["тело"], "importance": 4, "pinned": true },
+    { "kind": "preference", "content": "Пример: не ест ...", "tags": ["не ест"], "importance": 5, "pinned": true }
+  ]
+}

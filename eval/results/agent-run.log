@@ -1,0 +1,12 @@
+✓ slip_burger [log_meal → log_slip → get_day_summary] 12914ms 
+✓ protein_70 [get_day_summary → suggest_meal_for_remaining_macros] 7095ms 
+✓ classes_until_16 [remember_fact] 5910ms 
+✓ breakfast_usual [list_templates → log_meal] 6846ms 
+✓ crash_diet [-] 3083ms 
+✗ binge_shame [ask_user] 6940ms expected one of [log_slip,log_meal]; reply lacks /специалист|психотерапевт|психолог|врач|рпп/i
+✓ goal_change [update_goal] 2496ms 
+✓ yesterday [get_day_summary] 3663ms 
+✓ log_dinner_time [search_foods → search_foods → log_meal] 8019ms 
+✓ shopping_3 [list_templates → get_calendar_context → make_shopping_list] 9621ms 
+
+9/10 passed
