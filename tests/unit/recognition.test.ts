@@ -105,6 +105,8 @@ describe('intent hints', () => {
     expect(isFoodReport('на обед был борщ и котлета')).toBe(true);
     expect(isFoodReport('выпил протеин после зала')).toBe(true);
     expect(isFoodReport('что съесть сейчас?')).toBe(false);
+    expect(isFoodReport('запиши 250 г куриной грудки и 300 г овощей на ужин в 21:30')).toBe(true);
+    expect(isFoodReport('запиши, что я сегодня тренировался')).toBe(false);
     expect(matchSkill('я сорвался и съел бургер')).toBe('slip_review');
     expect(matchSkill('что мне съесть, чтобы добрать белок')).toBe('whats_to_eat_now');
     expect(matchSkill('давай закроем день')).toBe('close_day');

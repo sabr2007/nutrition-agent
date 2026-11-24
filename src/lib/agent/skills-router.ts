@@ -29,6 +29,11 @@ export function safetySignals(text: string | undefined | null, recentSlips: numb
 // "I ate X" reports must be logged first; weaker models sometimes answer with suggestions instead.
 const FOOD_REPORT = /(^|\s)(съел[аи]?|поел[аи]?|наел(ся|ась)|выпил[аи]?|перекусил[аи]?|позавтракал[аи]?|пообедал[аи]?|поужинал[аи]?|скушал[аи]?|был[аи]? на (обеде|ужине)|на (завтрак|обед|ужин) (был|была|было|были|ел))(\s|$|[,.!])/i;
 
+// "запиши 250 г грудки…" is a food report too: an explicit request to log, with an amount.
+const LOG_REQUEST = /(^|\s)(запиши|добавь|внеси)(\s|$)/i;
+const AMOUNT = /\d+([.,]\d+)?\s*(г|гр|грамм\w*|кг|мл|шт\w*)(\s|$|[,.;])/i;
+
 export function isFoodReport(text: string | undefined | null): boolean {
-  return Boolean(text && FOOD_REPORT.test(text) && !/\?\s*$/.test(text.trim()));
+  if (!text || /\?\s*$/.test(text.trim())) return false;
+  return FOOD_REPORT.test(text) || (LOG_REQUEST.test(text) && AMOUNT.test(text));
 }
