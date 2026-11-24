@@ -11,7 +11,7 @@
 | Vercel env (prod + preview) | Supabase URL/ключи, VAPID, CRON_SECRET, APP_ENCRYPTION_KEY, APP_URL, CLOUDFLARE_*, LLM_PROVIDER_ORDER, LLM_DISABLE_GATEWAY, RECOGNITION_SAMPLES | ✓ |
 | Cloudflare API-токен | только Workers AI Read/Write + AI Gateway Read/Run, имя «ryadom-nutrition-agent (Workers AI)» | ✓ |
 | GitHub Actions | секреты `SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD` | ✓ |
-| ChatGPT plan | ждёт формы и входа владельца — см. §3 | 🟡 |
+| ChatGPT plan | подключён 24.11, `CHATGPT_PLAN_ENABLED=1` — см. §3 | ✓ |
 
 ## 1. Прод-база (уже поднята; для повторного запуска или нового окружения)
 ```bash
@@ -59,7 +59,7 @@ pnpm dev
 Тесты: `pnpm test` (unit), `pnpm test:e2e` (Playwright, нужен локальный стек и `E2E_EMAIL`/`E2E_PASSWORD`), eval: см. README.
 
 ## 5. Модели и стоимость
-- Порядок провайдеров — `LLM_PROVIDER_ORDER` (по умолчанию `chatgpt,gateway,openai,workers-ai`); неподключённые пропускаются. Сейчас работает Cloudflare Workers AI, Gateway выключен `LLM_DISABLE_GATEWAY=1`.
+- Порядок провайдеров — `LLM_PROVIDER_ORDER` (по умолчанию `chatgpt,gateway,openai,workers-ai`); неподключённые пропускаются. Сейчас первым идёт ChatGPT plan, за ним Cloudflare Workers AI; Gateway выключен `LLM_DISABLE_GATEWAY=1`.
 - Workers AI: 10 000 нейронов в сутки бесплатно (сброс 00:00 UTC), сверх — только на Workers Paid ($5/мес, $0.011 за 1000 нейронов). Расход — Cloudflare → AI → Workers AI.
 - Включить Gateway (быстрее фото): карта в Vercel → удалить `LLM_DISABLE_GATEWAY` → Redeploy.
 - Число прогонов на фото — `RECOGNITION_SAMPLES` (1–3, по умолчанию авто). Расход по моделям за 7 дней — «Настройки → Модели».
