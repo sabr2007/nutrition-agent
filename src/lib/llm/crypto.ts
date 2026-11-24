@@ -10,6 +10,16 @@ function key(): Buffer {
   return k;
 }
 
+/** True when APP_ENCRYPTION_KEY is usable, so a client can check before sending tokens. */
+export function encryptionReady(): boolean {
+  try {
+    key();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function encrypt(plain: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv('aes-256-gcm', key(), iv);

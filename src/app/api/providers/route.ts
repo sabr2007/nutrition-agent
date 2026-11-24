@@ -1,4 +1,5 @@
 import { handler, json, requireUser } from '@/lib/http';
+import { encryptionReady } from '@/lib/llm/crypto';
 import { providerStatus } from '@/lib/llm/router';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { serverEnv } from '@/lib/env';
@@ -20,6 +21,8 @@ export const GET = handler(async (req) => {
   return json({
     order: env.providerOrder,
     configured: { gateway: env.gatewayConfigured, openai: Boolean(env.openaiApiKey), workers_ai: Boolean(env.cloudflareApiToken), chatgpt_plan: process.env.CHATGPT_PLAN_ENABLED === '1' },
+    // Checked by scripts/chatgpt-login.ts before the OpenAI consent, so a bad key fails early.
+    token_storage_ready: encryptionReady(),
     routes: providerStatus(),
     connections: conn ?? [],
     usage_7d: usage,

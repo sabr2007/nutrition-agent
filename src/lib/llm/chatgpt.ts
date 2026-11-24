@@ -1,5 +1,6 @@
 import 'server-only';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { hasPlanScope, type ConnectPayload } from './chatgpt-connect';
 import { decrypt, encrypt } from './crypto';
 
 // "Sign in with ChatGPT" plan usage (docs/research/chatgpt-oauth.md). Tokens arrive from the
@@ -60,14 +61,15 @@ async function refresh(userId: string, c: { id: string; refresh_token_enc: strin
   }
 }
 
-/** Stores tokens obtained by the local login CLI. */
-export async function saveChatgptTokens(userId: string, t: { access_token: string; refresh_token: string; expires_in: number; scope: string; client_id: string; earliest_refresh_at?: string | null }) {
-  const admin = supabaseAdmin();
-  if (!t.scope.split(' ').includes('chatgpt.tokens.use.direct')) throw new Error('scope chatgpt.tokens.use.direct was not granted');
-  await admin.from('provider_connections').upsert({
+/** Stores tokens obtained by the local login CLI. Throws if the row was not written. */
+export async function saveChatgptTokens(userId: string, t: ConnectPayload): Promise<void> {
+  if (!hasPlanScope(t.scope)) throw new Error('scope chatgpt.tokens.use.direct was not granted');
+  const { error } = await supabaseAdmin().from('provider_connections').upsert({
     user_id: userId, provider: 'chatgpt', status: 'connected',
     access_token_enc: encrypt(t.access_token), refresh_token_enc: encrypt(t.refresh_token),
     expires_at: new Date(Date.now() + t.expires_in * 1000).toISOString(), scope: t.scope,
     meta: { client_id: t.client_id, earliest_refresh_at: t.earliest_refresh_at ?? null },
   }, { onConflict: 'user_id,provider' });
+  // Only the code: PostgREST details can echo row values, and these are tokens.
+  if (error) throw new Error(`provider_connections upsert failed (${error.code})`);
 }
