@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "eval:photo": "TSX_TSCONFIG_PATH=tsconfig.scripts.json node --conditions=react-server --env-file=.env.local --import tsx eval/photo-eval.ts",
     "eval:agent": "TSX_TSCONFIG_PATH=tsconfig.scripts.json node --conditions=react-server --env-file=.env.local --import tsx eval/agent-eval.ts",
+    "eval:label": "TSX_TSCONFIG_PATH=tsconfig.scripts.json node --conditions=react-server --env-file=.env.local --import tsx eval/label-eval.ts",
     "user:create": "TSX_TSCONFIG_PATH=tsconfig.scripts.json node --env-file=.env.local --import tsx scripts/create-user.ts"
   },
   "dependencies": {

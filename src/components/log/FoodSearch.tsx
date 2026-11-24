@@ -2,18 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
-import { useSession } from '@/components/auth/AuthGate';
 import type { Food } from '@/lib/nutrition/types';
+import { LabelForm } from './LabelForm';
 
 type Props = { initial?: string; onPick: (food: Food) => void; onClose: () => void };
 
 /** Bottom sheet: fuzzy search in the food DB (+ create a personal food from a label). */
 export function FoodSearch({ initial = '', onPick, onClose }: Props) {
-  const session = useSession();
   const [q, setQ] = useState(initial);
   const [results, setResults] = useState<Food[]>([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: '', kcal: '', protein: '', fat: '', carbs: '', state: 'as_is' });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -24,14 +22,6 @@ export function FoodSearch({ initial = '', onPick, onClose }: Props) {
       setResults((data ?? []) as Food[]);
     }, 160);
   }, [q]);
-
-  async function create() {
-    const num = (s: string) => Number(s.replace(',', '.'));
-    const row = { user_id: session!.user.id, source: 'label', name_ru: form.name.trim(), state: form.state, kcal_100g: num(form.kcal), protein_100g: num(form.protein) || 0, fat_100g: num(form.fat) || 0, carbs_100g: num(form.carbs) || 0, confidence: 'high' };
-    if (!row.name_ru || !Number.isFinite(row.kcal_100g)) return;
-    const { data, error } = await supabaseBrowser().from('foods').insert(row).select('*').single();
-    if (!error && data) onPick(data as Food);
-  }
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-ink/30 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Поиск продукта">
@@ -55,31 +45,14 @@ export function FoodSearch({ initial = '', onPick, onClose }: Props) {
                   </button>
                 </li>
               ))}
-              {q.trim().length >= 2 && !results.length && <li className="px-4 py-6 text-center text-sm text-ink-3">Не нашёл. Можно создать свой продукт по этикетке.</li>}
+              {q.trim().length >= 2 && !results.length && <li className="px-4 py-6 text-center text-sm text-ink-3">Не нашёл. Сфоткай этикетку — добавлю как свой продукт.</li>}
             </ul>
           )}
           {creating ? (
-            <div className="space-y-3 p-4">
-              <p className="label">свой продукт · на 100 г</p>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Название" className="w-full rounded-xl border border-rule bg-card px-3 py-3" />
-              <div className="grid grid-cols-4 gap-2">
-                {(['kcal', 'protein', 'fat', 'carbs'] as const).map((k) => (
-                  <label key={k} className="block">
-                    <span className="label">{({ kcal: 'ккал', protein: 'белки', fat: 'жиры', carbs: 'углев.' })[k]}</span>
-                    <input inputMode="decimal" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className="mt-1 w-full rounded-xl border border-rule bg-card px-2 py-2 text-right font-mono" />
-                  </label>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                {(['as_is', 'raw', 'dry', 'cooked'] as const).map((st) => (
-                  <button key={st} onClick={() => setForm({ ...form, state: st })} className={`press rounded-full border px-3 py-1.5 text-xs ${form.state === st ? 'border-ink bg-ink text-linen' : 'border-rule'}`}>{STATE[st]}</button>
-                ))}
-              </div>
-              <button onClick={create} className="press w-full rounded-full bg-ink py-3 text-linen">Создать и добавить</button>
-            </div>
+            <LabelForm initialName={q} onCreated={({ food }) => onPick(food)} />
           ) : (
             <div className="p-4">
-              <button onClick={() => { setCreating(true); setForm((f) => ({ ...f, name: q })); }} className="press w-full rounded-full border border-dashed border-rule-strong py-3 text-sm text-ink-2">+ свой продукт по этикетке</button>
+              <button onClick={() => setCreating(true)} className="press w-full rounded-full border border-dashed border-rule-strong py-3 text-sm text-ink-2">▤ свой продукт по этикетке — фото или вручную</button>
             </div>
           )}
         </div>

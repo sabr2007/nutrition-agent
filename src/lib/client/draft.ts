@@ -13,7 +13,7 @@ export type DraftItem = MealItemInput & {
 };
 
 export type Draft = {
-  source: 'photo' | 'text' | 'voice' | 'scale' | 'manual' | 'template' | 'edit' | 'barcode';
+  source: 'photo' | 'text' | 'voice' | 'scale' | 'manual' | 'template' | 'edit' | 'barcode' | 'label';
   recognitionId: string | null;
   items: DraftItem[];
   questions: ClarifyingQuestion[];

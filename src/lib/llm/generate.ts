@@ -20,6 +20,9 @@ type GenArgs = {
   maxOutputTokens?: number;
 };
 
+// Workers AI answers 400 to reasoning_effort=low for Mistral models ("supported: none, high").
+const NO_REASONING_EFFORT = /mistral/i;
+
 function callSettings(ref: ModelRef, temperature?: number, maxOutputTokens = 2500) {
   // ChatGPT plan route rejects temperature/max_output_tokens and requires store=false.
   if (ref.provider === 'chatgpt') return { providerOptions: { openai: { store: false } } };
@@ -27,7 +30,7 @@ function callSettings(ref: ModelRef, temperature?: number, maxOutputTokens = 250
     ...(temperature != null ? { temperature } : {}),
     // Workers AI defaults to a tiny output budget; structured JSON gets truncated without this.
     maxOutputTokens,
-    reasoning: 'low' as const,
+    ...(NO_REASONING_EFFORT.test(ref.model) ? {} : { reasoning: 'low' as const }),
   };
 }
 

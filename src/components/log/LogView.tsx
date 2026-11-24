@@ -18,6 +18,7 @@ import { useSession } from '@/components/auth/AuthGate';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmView } from './ConfirmView';
 import { FoodSearch } from './FoodSearch';
+import { LabelForm, type LabelCreated } from './LabelForm';
 
 type RecognizeResponse = {
   recognitionId: string | null; items: DraftItem[]; questions: Draft['questions']; confidence: number; agreement: number | null;
@@ -49,12 +50,16 @@ export function LogView() {
   const [recording, setRecording] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [labelSheet, setLabelSheet] = useState<{ file: File; barcode: string | null } | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const recStart = useRef(0);
   const photoInput = useRef<HTMLInputElement>(null);
   const scaleInput = useRef<HTMLInputElement>(null);
   const photoMode = useRef<'plate' | 'scale'>('plate');
+  const galleryInput = useRef<HTMLInputElement>(null);
+  const labelInput = useRef<HTMLInputElement>(null);
+  const pendingBarcode = useRef<string | null>(null);
 
   const eatenAt = (): Date => {
     if (customTime) {
@@ -116,6 +121,17 @@ export function LogView() {
     } finally {
       setBusy(null);
     }
+  }
+
+  /** Opens the photo picker for a nutrition label (library or camera; no `capture` on purpose). */
+  function pickLabel(barcode: string | null = null) {
+    pendingBarcode.current = barcode;
+    labelInput.current?.click();
+  }
+
+  function fromLabel(r: LabelCreated) {
+    setLabelSheet(null);
+    setDraft({ source: 'label', recognitionId: r.recognitionId, items: [{ ...itemFromFood(r.food, r.grams, { source: 'user' }), key: 'l0' }], questions: [], confidence: null, agreement: null, shownAt: Date.now() });
   }
 
   async function toggleRecording() {
@@ -235,14 +251,23 @@ export function LogView() {
             </button>
           </form>
 
-          <div className="mt-3 grid grid-cols-4 gap-2">
+          <div className="mt-3 grid grid-cols-3 gap-2">
             <ActionTile glyph="◉" label="фото" busy={busy === 'photo' && photoMode.current === 'plate'} onClick={() => { photoMode.current = 'plate'; photoInput.current?.click(); }} />
             <ActionTile glyph="⚖" label="на весах" busy={busy === 'photo' && photoMode.current === 'scale'} onClick={() => { photoMode.current = 'scale'; scaleInput.current?.click(); }} />
             <ActionTile glyph={recording ? '■' : '●'} label={recording ? 'стоп' : 'голос'} active={recording} busy={busy === 'voice'} onClick={toggleRecording} />
             <ActionTile glyph="▥" label="штрихкод" busy={busy === 'barcode'} onClick={() => setBarcodeOpen(true)} />
+            <ActionTile glyph="▤" label="этикетка" onClick={() => pickLabel()} />
+            <ActionTile glyph="◫" label="из галереи" onClick={() => { photoMode.current = 'plate'; galleryInput.current?.click(); }} />
           </div>
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onPhoto(e.target.files?.[0]); e.target.value = ''; }} />
           <input ref={scaleInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+          <input ref={galleryInput} type="file" accept="image/*" hidden aria-label="Фото еды из галереи" onChange={(e) => { void onPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+          <input ref={labelInput} type="file" accept="image/*" hidden aria-label="Фото этикетки" onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) setLabelSheet({ file, barcode: pendingBarcode.current });
+            pendingBarcode.current = null;
+            e.target.value = '';
+          }} />
           {busy === 'photo' && <p className="mt-2 text-center font-mono text-xs text-ink-3 blink">смотрю на тарелку… обычно 20–40 секунд</p>}
           {recording && <p className="mt-2 text-center font-mono text-xs text-over blink">идёт запись — скажи, что и сколько съел</p>}
 
@@ -294,7 +319,15 @@ export function LogView() {
           setDraft({ source: 'manual', recognitionId: null, items: [{ ...itemFromFood(f, Number(f.default_portion_g ?? 100), { source: 'user' }), key: 'm0' }], questions: [], confidence: null, agreement: null, shownAt: Date.now() });
         }} />
       )}
-      {barcodeOpen && <BarcodeSheet onClose={() => setBarcodeOpen(false)} onFood={(f) => { setBarcodeOpen(false); setDraft({ source: 'barcode', recognitionId: null, items: [{ ...itemFromFood(f, Number(f.default_portion_g ?? 100), { source: 'barcode' }), key: 'b0' }], questions: [], confidence: null, agreement: null, shownAt: Date.now() }); }} />}
+      {barcodeOpen && <BarcodeSheet onClose={() => setBarcodeOpen(false)} onLabel={(code) => { setBarcodeOpen(false); pickLabel(code); }} onFood={(f) => { setBarcodeOpen(false); setDraft({ source: 'barcode', recognitionId: null, items: [{ ...itemFromFood(f, Number(f.default_portion_g ?? 100), { source: 'barcode' }), key: 'b0' }], questions: [], confidence: null, agreement: null, shownAt: Date.now() }); }} />}
+      {labelSheet && (
+        <div className="fixed inset-0 z-40 flex flex-col bg-ink/30 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Продукт по этикетке">
+          <button className="flex-1" aria-label="Закрыть" onClick={() => setLabelSheet(null)} />
+          <div className="sheet-enter max-h-[88dvh] overflow-y-auto rounded-t-[var(--radius-lg)] bg-linen pb-[var(--safe-bottom)] shadow-[var(--shadow-float)]">
+            <LabelForm initialFile={labelSheet.file} barcode={labelSheet.barcode} onCreated={fromLabel} />
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -308,10 +341,11 @@ function ActionTile({ glyph, label, onClick, busy, active }: { glyph: string; la
   );
 }
 
-function BarcodeSheet({ onClose, onFood }: { onClose: () => void; onFood: (f: Food) => void }) {
+function BarcodeSheet({ onClose, onFood, onLabel }: { onClose: () => void; onFood: (f: Food) => void; onLabel: (code: string) => void }) {
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const shot = useRef<HTMLInputElement>(null);
   async function fromPhoto(file: File | undefined) {
     if (!file) return;
@@ -332,10 +366,11 @@ function BarcodeSheet({ onClose, onFood }: { onClose: () => void; onFood: (f: Fo
   async function lookup(value = code) {
     setBusy(true);
     setMsg(null);
+    setNotFound(false);
     try {
       const r = await api<{ food: Food | null; message?: string }>(`/api/barcode/${encodeURIComponent(value.trim())}`);
       if (r.food) onFood(r.food);
-      else setMsg(r.message ?? 'Не нашёл в Open Food Facts. Создай продукт по этикетке в поиске.');
+      else { setMsg(r.message ?? 'Не нашёл в Open Food Facts.'); setNotFound(true); }
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -354,6 +389,7 @@ function BarcodeSheet({ onClose, onFood }: { onClose: () => void; onFood: (f: Fo
         <button onClick={() => shot.current?.click()} disabled={busy} className="press mt-3 w-full rounded-full border border-ink py-3 text-sm">◉ Сфоткать штрихкод</button>
         <input ref={shot} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void fromPhoto(e.target.files?.[0]); e.target.value = ''; }} />
         {msg && <p className="mt-3 text-sm text-ink-2">{msg}</p>}
+        {notFound && <button onClick={() => onLabel(code)} className="press mt-3 w-full rounded-full bg-ink py-3 text-sm text-linen">▤ Сфоткать этикетку — сохраню с этим штрихкодом</button>}
         <p className="mt-3 text-xs text-ink-3">Ищу в Open Food Facts (в Казахстане ~1000 товаров, половина с КБЖУ). Найденное сохраняется в твою базу.</p>
       </div>
     </div>

@@ -23,7 +23,7 @@ export const SaveMealSchema = z.object({
   eaten_at: z.string().datetime({ offset: true }).optional(),
   slot: z.string().max(30).nullable().optional(),
   title: z.string().max(200).nullable().optional(),
-  input_method: z.enum(['template', 'text', 'photo', 'voice', 'barcode', 'repeat', 'manual', 'agent', 'scale', 'import']),
+  input_method: z.enum(['template', 'text', 'photo', 'voice', 'barcode', 'repeat', 'manual', 'agent', 'scale', 'import', 'label']),
   template_id: z.string().uuid().nullable().optional(),
   recognition_id: z.string().uuid().nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
