@@ -15,9 +15,11 @@
 
 ## 1. Прод-база (уже поднята; для повторного запуска или нового окружения)
 ```bash
-./scripts/bootstrap-prod.sh <логин-владельца>
+./scripts/bootstrap-prod.sh ЛОГИН
 ```
-Нужны залогиненные `supabase` и `vercel` CLI. Скрипт идемпотентен: найдёт проект, применит недостающие миграции, обновит секреты cron и ключи в Vercel, передеплоит. Пароль владельца печатается один раз только при создании аккаунта. Сбросить пароль: `scripts/create-user.ts --email <логин> --reset-password` (с ключами прод-окружения).
+Нужны залогиненные `supabase` и `vercel` CLI. Скрипт идемпотентен: найдёт проект, применит недостающие миграции, обновит секреты cron и ключи в Vercel, передеплоит. Пароль владельца печатается один раз только при создании аккаунта. Сбросить пароль: `scripts/create-user.ts --email ЛОГИН --reset-password` (с ключами прод-окружения).
+
+`ЛОГИН` в командах — логин от приложения (тот, которым входишь в «Рядом»), без кавычек и скобок.
 
 **Личный план.** Цели, чек-лист, шаблоны, правила напоминаний, распорядок, цифры тела и стартовая память — в `scripts/personal-seed.json` (gitignored). Формат — `scripts/personal-seed.example.json`. Разделы плана, которых нет в личном файле, берутся из примера; профиль и память — никогда. Сид применяется один раз при создании аккаунта и не перезаписывает существующие строки; дальше всё правится в приложении («Настройки», «Память») или агентом.
 
@@ -30,18 +32,19 @@
 ## 3. ChatGPT plan («Войти через ChatGPT»)
 Официально self-serve доступен для open-source и локальных приложений (`docs/research/chatgpt-oauth.md`). Репозиторий уже публичный под MIT.
 1. Отправь форму https://openai.com/form/sign-in-with-chatgpt-interest/ (вариант «Sign in and ChatGPT plan use for AI requests», ссылка на репозиторий). Это подтверждение, что хостинг на Vercel для личного OSS-приложения допустим.
-2. Скачай env прод-окружения (файл gitignored):
+2. Скачай публичные переменные прод-окружения (файл gitignored; секретные значения Vercel всё равно не отдаёт, они и не нужны):
    ```bash
    vercel env pull .env.production.local --environment=production
    ```
-3. Войди: откроется ссылка на auth.openai.com, redirect придёт на `127.0.0.1:1455`.
+3. Запусти вход. Скрипт спросит пароль от «Рядом» (ввод скрыт), затем напечатает ссылку на auth.openai.com; ответ придёт на `127.0.0.1:1455`:
    ```bash
-   TSX_TSCONFIG_PATH=tsconfig.scripts.json node --env-file=.env.production.local --conditions=react-server --import tsx scripts/chatgpt-login.ts --email <логин-владельца>
+   node --env-file=.env.production.local --import tsx scripts/chatgpt-login.ts --email ЛОГИН
    ```
+   `--email` — логин от «Рядом», а не почта ChatGPT. Токены уходят на сервер «Рядом» под твоим входом; сервер шифрует их своим ключом.
 4. Включи маршрут: `printf 1 | vercel env add CHATGPT_PLAN_ENABLED production`, затем редеплой.
 5. Поставь недельный лимит для приложения: ChatGPT → Settings → Usage.
 
-При исчерпании лимита (`429 subscription_sharing_usage_limit_exceeded`) запросы автоматически уходят на следующий провайдер. После входа удали `.env.production.local`.
+При исчерпании лимита (`429 subscription_sharing_usage_limit_exceeded`) запросы автоматически уходят на следующий провайдер. Выданный OpenAI `client_id` хранится в `scripts/.chatgpt-client.json` (gitignored) и используется при следующих входах.
 
 ## 4. Локальная разработка
 ```bash
