@@ -9,6 +9,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Public repository: the workflow token only needs to read the code.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
