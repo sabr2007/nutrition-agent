@@ -50,7 +50,7 @@ export type AgentOptions = {
   onEvent?: (e: ChatEvent) => void;
 };
 
-const MAX_STEPS = 8;
+const MAX_STEPS = 10;
 const HISTORY = 16;
 const RUN_TIMEOUT_MS = 90_000;
 const DEEP_TIMEOUT_MS = 240_000;
@@ -209,6 +209,8 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
     const attempt = await callModel(spec, { userId, runId, purpose }, async (model) => {
       const st = streamText({
         model, instructions: system, messages, tools: namespaced(buildTools(toolCtx)), stopWhen: isStepCount(MAX_STEPS),
+        // The last allowed step must be the reply: a run that spends every step on tools ends mute.
+        prepareStep: ({ stepNumber }) => (stepNumber >= MAX_STEPS - 1 ? { toolChoice: 'none' as const } : undefined),
         maxRetries: 0, timeout: opts.deep ? DEEP_TIMEOUT_MS : RUN_TIMEOUT_MS, providerOptions: planOptions(spec),
         onChunk: ({ chunk }) => {
           if (!opts.onEvent) return;

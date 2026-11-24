@@ -112,6 +112,12 @@ function probesFor(token: string, slug: string): Record<string, Promise<Probe>> 
       return `calls=[${calls}] text=${(await st.text).trim()}`;
     }),
     vision: probe(async () => streamText({ ...base, messages: image, providerOptions: plain }).text),
+    // The agent's last allowed step forbids tools so the run always ends with a reply.
+    tool_choice_none: probe(async () => {
+      const st = streamText({ ...base, prompt: 'Вызови ping с n=21, если можешь, иначе ответь словом «нет».', tools: { ping }, toolChoice: 'none', providerOptions: plain });
+      const steps = await st.steps;
+      return `calls=${steps.flatMap((x) => x.toolCalls).length} text=${(await st.text).trim()}`;
+    }),
   };
 }
 
