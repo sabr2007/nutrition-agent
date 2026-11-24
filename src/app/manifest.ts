@@ -20,7 +20,7 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
     shortcuts: [
       { name: 'Записать еду', short_name: 'Записать', url: '/log' },
-      { name: 'Коуч', url: '/coach' },
+      { name: 'Чат', url: '/chat' },
     ],
   };
 }

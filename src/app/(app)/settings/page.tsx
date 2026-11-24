@@ -12,7 +12,9 @@ import type { Goal } from '@/lib/nutrition/types';
 
 type Profile = { display_name: string | null; day_boundary_minutes: number; quiet_start: string; quiet_end: string; training: { days: number[]; start: string; end: string } };
 type Rule = { id: string; key: string; title: string; kind: string; enabled: boolean; at_time: string | null };
-type Providers = { order: string[]; configured: Record<string, boolean>; usage_7d: Record<string, { calls: number; errors: number; cost: number }> };
+type Providers = { chatgpt: { status: string; updated_at: string | null }; models: Record<string, string>; usage_7d: Record<string, { calls: number; errors: number; cost: number }> };
+
+const TASK_LABEL: Record<string, string> = { agent: 'чат и агент', deep: 'думать дольше', vision: 'фото и этикетки', parse: 'разбор текста', compose: 'тексты пушей' };
 
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
@@ -152,9 +154,12 @@ export default function SettingsPage() {
 
       <Section title="Модели">
         <div className="surface p-4 text-sm">
-          <p className="font-mono text-xs text-ink-2">порядок: {providers?.order.join(' → ')}</p>
+          <p className="flex justify-between font-mono text-xs">
+            <span>подписка ChatGPT</span>
+            <span className={providers?.chatgpt.status === 'connected' ? 'text-ok' : 'text-over'}>{providers ? (providers.chatgpt.status === 'connected' ? 'подключена' : 'нужно войти заново') : '…'}</span>
+          </p>
           <ul className="mt-2 space-y-1">
-            {providers && Object.entries(providers.configured).map(([k, v]) => <li key={k} className="flex justify-between font-mono text-xs"><span>{k}</span><span className={v ? 'text-ok' : 'text-ink-3'}>{v ? 'подключено' : 'нет'}</span></li>)}
+            {providers && Object.entries(providers.models).map(([task, model]) => <li key={task} className="flex justify-between font-mono text-xs"><span className="text-ink-2">{TASK_LABEL[task] ?? task}</span><span>{model}</span></li>)}
           </ul>
           {providers && Object.keys(providers.usage_7d).length > 0 && (
             <>
@@ -164,7 +169,7 @@ export default function SettingsPage() {
               </ul>
             </>
           )}
-          <p className="mt-3 text-xs text-ink-3">«Войти через ChatGPT» (оплата лимитом подписки) подключается по инструкции в docs/SETUP.md.</p>
+          <p className="mt-3 text-xs text-ink-3">Всё работает только на подписке ChatGPT, без запасных провайдеров. Голос расшифровывает Whisper (у подписки нет распознавания речи). Повторный вход — команда в docs/SETUP.md.</p>
         </div>
       </Section>
 

@@ -111,7 +111,7 @@
       "key": "evening_checkin", "title": "Вечерняя проверка агента", "kind": "agent", "at_time": "19:00",
       "window_minutes": 60, "condition": {}, "template": "Как день? Если что-то не записано — скажи, добавлю.",
       "compose_with_llm": true, "skill_key": "proactive_checkin", "priority": 2, "cooldown_minutes": 180,
-      "deep_link": "/coach"
+      "deep_link": "/chat"
     },
     {
       "key": "dinner", "title": "Ужин", "kind": "schedule", "at_time": "20:30", "window_minutes": 40,
@@ -123,13 +123,13 @@
       "key": "protein_gap_21", "title": "Белок к 21:00", "kind": "context", "at_time": "21:00", "window_minutes": 30,
       "condition": { "fact": "protein_remaining", "op": "gt", "value": 40 },
       "template": "До цели по белку ещё {protein_remaining} г. Подберу, чем добрать?", "compose_with_llm": true,
-      "skill_key": "whats_to_eat_now", "priority": 4, "cooldown_minutes": 240, "deep_link": "/coach"
+      "skill_key": "whats_to_eat_now", "priority": 4, "cooldown_minutes": 240, "deep_link": "/chat"
     },
     {
       "key": "close_day", "title": "Закрыть день", "kind": "schedule", "at_time": "22:30", "window_minutes": 30,
       "condition": { "fact": "checked.close_day", "op": "eq", "value": false },
       "template": "Закроем день? Проверь, всё ли записано — 30 секунд.", "compose_with_llm": true,
-      "skill_key": "close_day", "priority": 3, "cooldown_minutes": 120, "deep_link": "/coach?skill=close_day"
+      "skill_key": "close_day", "priority": 3, "cooldown_minutes": 120, "deep_link": "/chat?skill=close_day"
     }
   ],
   "memories": [

@@ -79,18 +79,6 @@ export function summarize(c: Cluster, nRuns: number): ClusterSummary {
   };
 }
 
-/**
- * Overall agreement weighted by estimated energy share, so disagreement about a
- * 600 kcal plov matters more than about a cucumber.
- */
-export function overallAgreement(summaries: ClusterSummary[]): number {
-  const weight = (s: ClusterSummary) => Math.max(1, ((s.food?.kcal_100g ?? 100) * s.grams) / 100);
-  const total = summaries.reduce((a, s) => a + weight(s), 0);
-  if (!total) return 0;
-  const agree = summaries.reduce((a, s) => a + weight(s) * s.presence * (1 - Math.min(s.spread, 1)), 0);
-  return Number((agree / total).toFixed(3));
-}
-
 /** Personal calibration: median ratio user/model for a food, shrunk toward 1. */
 export function calibrationRatio(ratios: number[], prior = 3): number {
   const clean = ratios.filter((r) => Number.isFinite(r) && r > 0.2 && r < 5);

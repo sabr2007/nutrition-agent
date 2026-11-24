@@ -50,7 +50,7 @@ export default function ReportPage() {
           </ul>
         ) : <p className="mt-2 text-sm text-ink-2">Срывов не записано.</p>}
       </section>
-      <Link href="/coach?skill=weekly_review" className="press mt-4 flex justify-center rounded-full bg-ink py-4 text-linen">Разобрать неделю с коучем</Link>
+      <Link href="/chat?skill=weekly_review" className="press mt-4 flex justify-center rounded-full bg-ink py-4 text-linen">Разобрать неделю в чате</Link>
     </main>
   );
 }

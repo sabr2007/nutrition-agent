@@ -146,9 +146,7 @@ async function compose(userId: string, rule: Rule, facts: Facts): Promise<string
     log: { userId, purpose: 'compose' },
     system: 'Ты пишешь одно короткое push-уведомление (до 160 символов) от спокойного коуча по питанию. На «ты», без восклицательных знаков, без стыда, без мотивационной воды. Одно конкретное действие. Цифры бери только из данных. Никогда не советуй меньше 1500 ккал.',
     messages: [{ role: 'user', content: `Смысл напоминания: «${fillTemplate(rule.template, facts)}».\nДанные дня: ${JSON.stringify(pickFacts(facts))}\nНапиши текст уведомления.` }],
-    temperature: 0.5,
-    maxOutputTokens: 300,
-    timeoutMs: 20_000,
+    timeoutMs: 30_000,
   });
   const text = res.result.trim().replace(/^["«]|["»]$/g, '');
   if (text.length < 8) throw new Error('empty compose');

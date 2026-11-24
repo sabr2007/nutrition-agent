@@ -32,6 +32,10 @@ const nextConfig: NextConfig = {
       '*.css': { loaders: ['@tailwindcss/turbopack'], as: '*.css' },
     },
   },
+  // The coach screen became the chat; old links (reminder deep links, home-screen shortcuts) keep working.
+  async redirects() {
+    return [{ source: '/coach', destination: '/chat', permanent: false }];
+  },
   async headers() {
     return [
       {

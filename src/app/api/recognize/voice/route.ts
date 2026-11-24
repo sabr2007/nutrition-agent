@@ -18,7 +18,7 @@ export const POST = handler(async (req) => {
   const { data: blob, error: dErr } = await sb.storage.from(m.bucket as string).download(m.path as string);
   if (dErr || !blob) throw new HttpError(404, 'Не удалось прочитать запись', 'storage');
   const audio = new Uint8Array(await blob.arrayBuffer());
-  const tr = await transcribeAudio(audio, (m.mime as string) || 'audio/mp4', { userId, purpose: 'transcribe' });
+  const tr = await transcribeAudio(audio, { userId, purpose: 'transcribe' });
   if (!tr.text.trim()) throw new HttpError(422, 'Не расслышал. Попробуй ещё раз или напиши текстом.', 'empty_transcript');
   const result = await parseFoodText({ sb, userId, text: tr.text, kind: 'voice', mediaIds: [m.id as string], transcript: tr.text, hints: { localTime: parsed.data.local_time } });
   return json({ ...result, transcript: tr.text });

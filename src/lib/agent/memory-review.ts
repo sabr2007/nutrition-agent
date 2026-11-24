@@ -36,8 +36,6 @@ export async function maybeReviewMemory(sb: SupabaseClient, userId: string): Pro
       system: 'Ты просматриваешь переписку коуча по питанию с человеком и выбираешь устойчивые факты для долгой памяти: распорядок (пары, смены, сон), предпочтения и ограничения в еде, повторяющиеся паттерны срывов и то, что помогает. НЕ сохраняй разовые события, цифры дня, догадки о здоровье и диагнозы. Только то, что прямо сказано. Не повторяй уже известное. Максимум 2 факта, можно 0.',
       messages: [{ role: 'user', content: `Уже известно:\n${known || '- ничего'}\n\nПереписка:\n${transcript}` }],
       schema: Proposal,
-      temperature: 0.1,
-      maxOutputTokens: 800,
     });
     const fresh = res.result.facts.filter((f) => f.content.length > 8 && !(mems ?? []).some((m) => m.content === f.content)).slice(0, 2);
     if (fresh.length) {

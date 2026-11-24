@@ -19,7 +19,7 @@ export function PushPrompt() {
   }
   return (
     <section className="surface mt-4 flex items-center gap-3 p-4">
-      <p className="flex-1 text-sm text-ink-2">{state === 'denied' ? 'Уведомления запрещены в настройках устройства.' : 'Включи напоминания — коуч будет писать по контексту дня.'}</p>
+      <p className="flex-1 text-sm text-ink-2">{state === 'denied' ? 'Уведомления запрещены в настройках устройства.' : 'Включи напоминания — Рядом будет писать по контексту дня.'}</p>
       {state !== 'denied' && (
         <button onClick={async () => { const r = await enablePush(); setState(r); toast({ text: r === 'enabled' ? 'Напоминания включены' : 'Не получилось включить', tone: r === 'enabled' ? 'default' : 'error' }); }}
           className="press rounded-full bg-ink px-4 py-2 text-sm text-linen">Включить</button>

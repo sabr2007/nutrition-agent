@@ -1,10 +1,10 @@
 import { Suspense } from 'react';
-import { CoachView } from '@/components/coach/CoachView';
+import { ChatView } from '@/components/chat/ChatView';
 
-export default function CoachPage() {
+export default function ChatPage() {
   return (
     <Suspense fallback={<div className="p-6"><span className="ascii text-ink-3 blink">загрузка</span></div>}>
-      <CoachView />
+      <ChatView />
     </Suspense>
   );
 }

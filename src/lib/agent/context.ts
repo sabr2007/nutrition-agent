@@ -4,7 +4,7 @@ import type { DaySummary } from '@/lib/data/day';
 import type { Profile } from '@/lib/data/profile';
 import { localParts } from '@/lib/nutrition/day';
 
-export const AGENT_PROMPT_VERSION = 'agent-v1';
+export const AGENT_PROMPT_VERSION = 'agent-v2';
 
 type MemoryRow = { id: string; kind: string; content: string; pinned: boolean; importance: number; status: string };
 type SkillRow = { key: string; title: string; description: string; user_id: string | null; version: number };
@@ -71,7 +71,21 @@ export type PromptInput = {
   safety?: { binge: boolean; reason: string | null };
   now?: Date;
   foodReport?: boolean;
+  /** Number of photos attached to the current message. */
+  photos?: number;
 };
+
+function photoRules(n: number): string {
+  return `
+
+## Фото в этом сообщении (${n})
+Сначала пойми, что на фото, и действуй сам:
+- Еда или тарелка — это приём пищи. Оцени каждый продукт и массу в том виде, как на фото (готовое блюдо — готовый вес). Масштаб: плоская тарелка 24–27 см, глубокая миска 14–16 см, вилка ~19 см, столовая ложка ~15 мл, ладонь ~9×10 см. Запиши одним вызовом log_meal: items с query (короткое общее название по-русски, как в базе: «куриная грудка запечённая», «гречка варёная», «плов»), grams и state. Видимое масло, соус, майонез — отдельной позицией. Плов, лагман, манты, самса, шаурма — одной позицией.
+- Этикетка или таблица пищевой ценности — save_label_food (перепиши числа точно как напечатано), потом, если он сказал, сколько съел, — log_meal с этим food_id. Не сказал — спроси граммы через ask_user.
+- Кухонные весы с продуктом — масса равна показанию. Напольные весы с весом тела — log_body_metric.
+- Если по подписи ясно, что он ещё не ел («что лучше взять?»), — не записывай, просто ответь.
+- После записи коротко: что записал, ккал и белок (для блюд — диапазон из kcal_range), остаток дня. Если оценка грубая — предложи уточнить граммы кнопками.`;
+}
 
 export function buildSystemPrompt(i: PromptInput): string {
   const now = localParts(i.now ?? new Date(), i.profile.timezone);
@@ -115,6 +129,7 @@ ${i.skills.map((s) => `- ${s.key} — ${s.description}`).join('\n')}
 ${daySnapshot(i.summary)}`;
 
   const skillBlock = (i.activeSkill ? `\n\n## Активный навык: ${i.activeSkill.key} (следуй процедуре)\n${i.activeSkill.body.trim()}` : '')
+    + (i.photos ? photoRules(i.photos) : '')
     + (i.foodReport ? `\n\n## Важно для этого ответа\nЧеловек сообщает о том, что уже съел. Сначала запиши это одним вызовом log_meal (честная оценка порции; для блюд назови диапазон ккал из ответа инструмента), потом коротко подтверди цифрами и остатком дня. Советы — только если он просит.` : '')
     + (i.safety?.binge ? `\n\n## Важно для этого ответа\nЗамечено: ${i.safety.reason}. Сначала запиши съеденное (log_meal, честная примерная оценка) и срыв (log_slip). В ответе обязательно, бережно и одним предложением предложи поговорить со специалистом (психотерапевт или диетолог, работающий с перееданием/РПП) — без диагнозов, без давления, без стыда. Не обсуждай компенсации.` : '');
   if (i.mode === 'chat') {

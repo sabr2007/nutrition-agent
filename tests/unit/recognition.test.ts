@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { quickParse } from '@/lib/recognition/quickparse';
-import { calibrationRatio, clusterRuns, overallAgreement, summarize, type RunItem } from '@/lib/recognition/aggregate';
+import { calibrationRatio, clusterRuns, summarize, type RunItem } from '@/lib/recognition/aggregate';
 import { pickBest } from '@/lib/recognition/match';
 import type { Food } from '@/lib/nutrition/types';
 
@@ -47,12 +47,6 @@ describe('self-consistency aggregation', () => {
     const r = summarize(clusters[1], 2);
     expect(r.presence).toBe(0.5);
     expect(r.confidence).toBeLessThan(s.confidence);
-  });
-  test('agreement is 1 for identical runs and lower when runs disagree', () => {
-    const same = clusterRuns([[ri(0, chicken, 200)], [ri(1, chicken, 200)]]).map((c) => summarize(c, 2));
-    expect(overallAgreement(same)).toBe(1);
-    const diff = clusterRuns([[ri(0, chicken, 100)], [ri(1, chicken, 300)]]).map((c) => summarize(c, 2));
-    expect(overallAgreement(diff)).toBeLessThan(0.1);
   });
   test('calibration ratio shrinks toward 1 with few corrections', () => {
     expect(calibrationRatio([])).toBe(1);

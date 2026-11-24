@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { hideDevOverlay } from './chat-helpers';
 
 const email = process.env.E2E_EMAIL ?? '';
 const password = process.env.E2E_PASSWORD ?? '';
@@ -7,6 +8,7 @@ const password = process.env.E2E_PASSWORD ?? '';
 test.skip(!email || !password, 'E2E_EMAIL / E2E_PASSWORD not set');
 
 async function login(page: Page) {
+  await hideDevOverlay(page);
   await page.goto('/login');
   await page.getByLabel('почта').fill(email);
   await page.getByLabel('пароль').fill(password);

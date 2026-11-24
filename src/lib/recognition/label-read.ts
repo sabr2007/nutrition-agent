@@ -2,9 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
 import { genObject } from '@/lib/llm/generate';
-import { getChatgptToken } from '@/lib/llm/chatgpt';
 import { costUsd } from '@/lib/llm/pricing';
-import { candidates, type ModelRef } from '@/lib/llm/providers';
 import { LABEL_PROMPT_VERSION, LabelOutput, labelSystemPrompt, normalizeLabel, type NormalizedLabel } from './label';
 
 export type LabelReadResult = { recognitionId: string | null; label: NormalizedLabel; model: string; latencyMs: number };
@@ -12,21 +10,10 @@ export type LabelReadResult = { recognitionId: string | null; label: NormalizedL
 export class LabelUnreadableError extends Error {}
 
 const LABEL_TIMEOUT_MS = 90_000;
-const LABEL_MAX_OUTPUT_TOKENS = 900;
-// eval/label-eval.ts: Qwen 3.8 27B 6/6 (median ~13 s), Llama 4 Scout 6/6 (~7 s); Mistral Small
-// loops on whitespace with this schema, so it is left out of label reading.
-const LABEL_FALLBACK: ModelRef = { provider: 'workers-ai', model: '@cf/meta/llama-4-scout-17b-16e-instruct' };
-const EXCLUDED = /mistral/i;
-
-/** Vision route (ChatGPT / Gateway first when enabled) without Mistral, Scout as the last resort. */
-export function labelModelOrder(chatgptAccessToken: string | null): ModelRef[] {
-  const pool = candidates('vision', { chatgptAccessToken }).filter((m) => !EXCLUDED.test(m.model));
-  return pool.some((m) => m.model === LABEL_FALLBACK.model) ? pool : [...pool, LABEL_FALLBACK];
-}
 
 /**
  * Reads a nutrition label photo: one vision call (transcription only), deterministic
- * normalization, and the raw model output stored in `recognitions` for later evals.
+ * normalization, and the raw model output stored in `recognitions`.
  */
 export async function readLabel(opts: {
   sb: SupabaseClient; userId: string; image: { data: Uint8Array; mime: string }; mediaId: string;
@@ -39,23 +26,18 @@ export async function readLabel(opts: {
       { type: 'file', mediaType: opts.image.mime || 'image/jpeg', data: opts.image.data },
     ],
   }];
-  const chatgptAccessToken = await getChatgptToken(opts.userId).catch(() => null);
   const attempt = await genObject({
     task: 'vision',
     log: { userId: opts.userId, purpose: 'label' },
     system: labelSystemPrompt(),
     messages,
     schema: LabelOutput,
-    temperature: 0,
     timeoutMs: LABEL_TIMEOUT_MS,
-    maxOutputTokens: LABEL_MAX_OUTPUT_TOKENS,
-    models: labelModelOrder(chatgptAccessToken),
-    ctx: { chatgptAccessToken },
   });
   const raw = attempt.result;
-  const cost = costUsd(attempt.ref.model, attempt.usage?.inputTokens, attempt.usage?.outputTokens);
+  const cost = costUsd(attempt.model, attempt.usage?.inputTokens, attempt.usage?.outputTokens);
   const run = {
-    provider: attempt.ref.provider, model: attempt.ref.model, latency_ms: attempt.latencyMs,
+    provider: 'chatgpt', model: attempt.model, latency_ms: attempt.latencyMs,
     tokens_in: attempt.usage?.inputTokens, tokens_out: attempt.usage?.outputTokens, cost_usd: cost, raw,
   };
   const base = {
@@ -75,5 +57,5 @@ export async function readLabel(opts: {
     .insert({ ...base, result: label, confidence: label.confidence, status: 'done' })
     .select('id').single();
   if (error) console.error('[label] recognition save failed', error.message);
-  return { recognitionId: (data?.id as string) ?? null, label, model: attempt.ref.model, latencyMs: Date.now() - t0 };
+  return { recognitionId: (data?.id as string) ?? null, label, model: attempt.model, latencyMs: Date.now() - t0 };
 }

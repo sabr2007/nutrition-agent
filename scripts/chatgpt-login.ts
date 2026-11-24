@@ -12,7 +12,7 @@
  * "[SENSITIVE]" placeholders written by `vercel env pull` are ignored. Before the browser step
  * the script checks that the app accepts the login and can store tokens. If the hand-off still
  * fails, the tokens stay in this process's memory and Enter retries without a new sign-in.
- * After login set CHATGPT_PLAN_ENABLED=1 in Vercel env and a weekly cap for the app in
+ * After login, set a weekly cap for the app in
  * ChatGPT → Settings → Usage. See docs/SETUP.md.
  */
 import { createServer, type ServerResponse } from 'node:http';
@@ -33,7 +33,7 @@ const STATE_FILE = 'scripts/.chatgpt-client.json'; // gitignored: issued client_
 const AGENT_NAME = 'Рядом';
 const HTTP_TIMEOUT_MS = 30_000;
 const EXIT_DELAY_MS = 300;
-const CONNECTED = '✓ ChatGPT plan connected. Now set CHATGPT_PLAN_ENABLED=1 in Vercel env.';
+const CONNECTED = '✓ ChatGPT plan connected. The app uses it right away for every model call.';
 const b64u = (b: Buffer) => b.toString('base64url');
 
 type OpenAiTokens = { access_token: string; refresh_token: string; expires_in: number; scope: string; earliest_refresh_at: string | number | null };

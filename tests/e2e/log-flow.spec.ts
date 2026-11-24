@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { hideDevOverlay } from './chat-helpers';
+
+test.beforeEach(async ({ page }) => { await hideDevOverlay(page); });
 
 const email = process.env.E2E_EMAIL ?? '';
 const password = process.env.E2E_PASSWORD ?? '';

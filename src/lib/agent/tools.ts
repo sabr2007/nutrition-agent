@@ -10,6 +10,9 @@ import { macrosFor, r1 } from '@/lib/nutrition/calc';
 import type { Food } from '@/lib/nutrition/types';
 import { pickBest, searchFoodsSmart } from '@/lib/recognition/match';
 import { personalContext } from '@/lib/recognition/pipeline';
+import { LabelOutput, normalizeLabel } from '@/lib/recognition/label';
+import { createPersonalFood } from '@/lib/data/foods';
+import type { AgentAction, LoggedMeal } from '@/lib/chat/protocol';
 import { suggestForRemaining } from './suggest';
 import { buildShoppingList } from './shopping';
 import { getTrends } from './trends';
@@ -24,6 +27,8 @@ export type ToolCtx = {
   ui: AgentUi;
   /** In eval mode writes are simulated. */
   dryRun?: boolean;
+  /** Photos attached to the current chat message: meals logged from them keep the link. */
+  photo?: { mediaIds: string[]; model: string };
 };
 
 export type PendingAction = { id: string; kind: 'update_goal' | 'delete_meal'; summary: string; params: Record<string, unknown> };
@@ -32,7 +37,9 @@ export type AgentUi = {
   proposedMemories: { id: string; content: string }[];
   pendingActions: PendingAction[];
   sentMessages: string[];
-  loggedMeals: { id: string; title: string; kcal: number; protein_g: number }[];
+  loggedMeals: LoggedMeal[];
+  /** Other writes (weight, checklist, reminders…) shown as chips under the reply. */
+  actions: AgentAction[];
 };
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD local day; default today');
@@ -46,6 +53,22 @@ const compactFood = (f: Food) => ({
 
 function dayOf(ctx: ToolCtx, date?: string): string {
   return date ?? todayFor(ctx.profile);
+}
+
+const METRIC_LABEL = { weight: 'Вес', waist: 'Талия', body_fat: 'Жир' } as const;
+
+/**
+ * Links a meal logged from chat photos to its raw inputs: one `recognitions` row per agent
+ * run (kind photo), so photo → recognition → meal stays traceable like on the log screen.
+ */
+async function photoRecognition(ctx: ToolCtx, items: { name: string; grams: number }[]): Promise<string | null> {
+  if (!ctx.photo?.mediaIds.length) return null;
+  const { data, error } = await ctx.sb.from('recognitions').insert({
+    user_id: ctx.userId, kind: 'photo', media_ids: ctx.photo.mediaIds, pipeline_version: 'chat-agent-v1', prompt_version: 'agent',
+    runs: [{ provider: 'chatgpt', model: ctx.photo.model, run_id: ctx.runId }], result: { items }, status: 'done',
+  }).select('id').single();
+  if (error) return null;
+  return data.id as string;
 }
 
 export function buildTools(ctx: ToolCtx): ToolSet {
@@ -150,9 +173,12 @@ export function buildTools(ctx: ToolCtx): ToolSet {
           return [a[0] + (f?.kcal_low_100g != null ? (Number(f.kcal_low_100g) * i.grams) / 100 : mid), a[1] + (f?.kcal_high_100g != null ? (Number(f.kcal_high_100g) * i.grams) / 100 : mid)];
         }, [0, 0]);
         const lowConfidence = items.filter((i) => fm.get(i.food_id)?.confidence === 'low').map((i) => i.name);
+        const fromPhoto = !templateId && Boolean(ctx.photo?.mediaIds.length);
+        const recognitionId = fromPhoto ? await photoRecognition(ctx, items.map((i) => ({ name: i.name, grams: i.grams }))) : null;
         const saved = await saveMeal(sb, userId, {
           eaten_at: eatenAt.toISOString(), slot, title: title ?? items.map((i) => i.name).slice(0, 3).join(', '),
-          input_method: templateId ? 'template' : 'agent', template_id: templateId, note: args.note ?? null,
+          input_method: templateId ? 'template' : fromPhoto ? 'photo' : 'agent', template_id: templateId, note: args.note ?? null,
+          recognition_id: recognitionId,
           client_id: `agent:${ctx.runId}:${JSON.stringify(items).length}:${items.map((i) => i.food_id.slice(0, 4) + i.grams).join('')}`.slice(0, 80),
           items,
         }, { checklistKey });
@@ -184,6 +210,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (ctx.dryRun) return { saved: true, dry_run: true };
         const eatenAt = time_local ? instantForLocal(m.local_day as string, time_local.padStart(5, '0'), ctx.profile.timezone, ctx.profile.day_boundary_minutes).toISOString() : (m.eaten_at as string);
         const saved = await saveMeal(sb, userId, { supersedes_id: meal_id, eaten_at: eatenAt, slot: slot ?? undefined, input_method: 'agent', items: newItems });
+        ctx.ui.actions.push({ kind: 'meal_edit', text: `Приём исправлен · ${Math.round(saved.kcal)} ккал · б ${r1(saved.protein_g)}` });
         return { saved: true, meal_id: saved.id, kcal: Math.round(saved.kcal), protein_g: saved.protein_g };
       },
     }),
@@ -206,6 +233,9 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       execute: async ({ key, done, value, date }) => {
         if (ctx.dryRun) return { ok: true, dry_run: true };
         await markChecklist(sb, userId, dayOf(ctx, date), key, done, 'agent', value ?? null);
+        const { data: item } = await sb.from('checklist_items').select('label').eq('user_id', userId).eq('key', key).maybeSingle();
+        const label = (item?.label as string | undefined) ?? key;
+        ctx.ui.actions.push({ kind: 'checklist', text: `${done ? '✓' : '○'} ${label}${value != null ? ` · ${value}` : ''}` });
         return { ok: true, key, done, value: value ?? null };
       },
     }),
@@ -221,6 +251,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         const { error } = await sb.from('body_metrics').insert({ user_id: userId, kind, value, unit, fasted: fasted ?? null, measured_at: measuredAt });
         if (error) return { error: error.message };
         if (kind === 'weight') await markChecklist(sb, userId, dayOf(ctx, date), 'weigh', true, 'agent');
+        ctx.ui.actions.push({ kind: 'body', text: `${METRIC_LABEL[kind]} ${value} ${unit === '%' ? '%' : unit === 'kg' ? 'кг' : 'см'}${date ? ` · ${date}` : ''}` });
         return { ok: true, kind, value, unit };
       },
     }),
@@ -237,6 +268,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (ctx.dryRun) return { ok: true, dry_run: true };
         const { data, error } = await sb.from('slips').insert({ user_id: userId, ...a }).select('id').single();
         if (error) return { error: error.message };
+        ctx.ui.actions.push({ kind: 'slip', text: 'Срыв записан — это данные, не провал' });
         return { ok: true, slip_id: data.id };
       },
     }),
@@ -275,6 +307,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (save && !ctx.dryRun) {
           const { data } = await sb.from('recipes').insert({ user_id: userId, title, body: { servings, ingredients: lines, steps, minutes: minutes ?? null }, ...perServing, source: 'agent' }).select('id').single();
           recipeId = (data?.id as string) ?? null;
+          if (recipeId) ctx.ui.actions.push({ kind: 'recipe', text: `Рецепт «${title}» сохранён · ${perServing.kcal} ккал/порция` });
         }
         return { recipe_id: recipeId, title, servings, per_serving: perServing, ingredients: lines.map((l) => ('missing' in l ? `${l.query}: НЕ НАЙДЕНО в базе` : `${l.food} ${l.grams}г`)) };
       },
@@ -283,7 +316,11 @@ export function buildTools(ctx: ToolCtx): ToolSet {
     make_shopping_list: tool({
       description: 'Shopping list for N days from the meal templates (raw weights aggregated and rounded to packs).',
       inputSchema: z.object({ days: z.number().int().min(1).max(14).default(3), start_date: dateSchema }),
-      execute: async ({ days, start_date }) => buildShoppingList(sb, userId, ctx.profile, days, dayOf(ctx, start_date), !ctx.dryRun),
+      execute: async ({ days, start_date }) => {
+        const list = await buildShoppingList(sb, userId, ctx.profile, days, dayOf(ctx, start_date), !ctx.dryRun);
+        if (!ctx.dryRun) ctx.ui.actions.push({ kind: 'shopping', text: `Список покупок на ${days} дн. сохранён` });
+        return list;
+      },
     }),
 
     schedule_reminder: tool({
@@ -296,6 +333,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (ctx.dryRun) return { ok: true, dry_run: true };
         const { error } = await sb.from('notifications').insert({ user_id: userId, rule_key: 'agent_reminder', local_day: day, title: 'Напоминание', body: text, scheduled_for: at.toISOString(), status: 'pending', deep_link: '/' });
         if (error) return { error: error.message };
+        ctx.ui.actions.push({ kind: 'reminder', text: `Напомню в ${time_local}${date ? ` (${date})` : ''}: ${text}` });
         return { ok: true, at_local: `${day} ${time_local}` };
       },
     }),
@@ -348,6 +386,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (error) return { error: error.message };
         if (a.supersedes_id && !a.propose) await sb.from('memories').update({ status: 'archived' }).eq('id', a.supersedes_id).eq('user_id', userId);
         if (a.propose) ctx.ui.proposedMemories.push({ id: data.id as string, content: a.content });
+        else if (a.kind !== 'day_summary' && a.kind !== 'week_summary') ctx.ui.actions.push({ kind: 'memory', text: `Запомнил: ${a.content}` });
         return { ok: true, id: data.id, status };
       },
     }),
@@ -394,6 +433,30 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       },
     }),
 
+    save_label_food: tool({
+      description: 'Save a packaged product from a nutrition label photo to the personal food base. Transcribe the printed numbers exactly (per 100 g and/or per serving); the code converts and checks them. Returns food_id for log_meal.',
+      inputSchema: LabelOutput,
+      execute: async (raw) => {
+        let label;
+        try {
+          label = normalizeLabel(raw);
+        } catch (e) {
+          return { error: (e as Error).message };
+        }
+        const name = label.name ?? raw.name ?? 'Продукт с этикетки';
+        if (ctx.dryRun) return { saved: true, dry_run: true, name, per100: label.per100, warnings: label.warnings.map((w) => w.text) };
+        const { food, created } = await createPersonalFood(sb, userId, {
+          name, brand: label.brand, state: label.state, kcal: label.per100.kcal, protein: label.per100.protein,
+          fat: label.per100.fat, carbs: label.per100.carbs, fiber: label.per100.fiber, portion_g: label.servingG,
+        }, 'chat');
+        ctx.ui.actions.push({ kind: 'food', text: `${created ? 'Продукт сохранён' : 'Продукт уже был в базе'}: ${food.name_ru} · ${Math.round(Number(food.kcal_100g))} ккал/100 г` });
+        return {
+          saved: true, created, food_id: food.id, name: food.name_ru, per100: label.per100, serving_g: label.servingG,
+          warnings: label.warnings.map((w) => w.text),
+        };
+      },
+    }),
+
     load_skill: tool({
       description: 'Load the full procedure of a skill from the skills index before following it.',
       inputSchema: z.object({ key: z.string() }),
@@ -429,5 +492,5 @@ export function buildTools(ctx: ToolCtx): ToolSet {
 }
 
 export function emptyUi(): AgentUi {
-  return { proposedMemories: [], pendingActions: [], sentMessages: [], loggedMeals: [] };
+  return { proposedMemories: [], pendingActions: [], sentMessages: [], loggedMeals: [], actions: [] };
 }

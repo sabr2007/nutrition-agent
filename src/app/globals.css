@@ -33,6 +33,12 @@
   --radius-lg: 28px;
   --shadow-card: 0 1px 0 rgb(29 26 21 / 0.04), 0 8px 24px -12px rgb(29 26 21 / 0.18);
   --shadow-float: 0 18px 40px -16px rgb(29 26 21 / 0.45);
+  --shadow-composer: 0 1px 0 rgb(29 26 21 / 0.04), 0 10px 30px -14px rgb(29 26 21 / 0.28);
+  --shadow-menu: 0 24px 60px -18px rgb(29 26 21 / 0.42), 0 2px 8px -2px rgb(29 26 21 / 0.12);
+
+  /* chat: the user's bubble is warm grey on linen, like ChatGPT's grey bubble on white */
+  --bubble: #e6e1d3;
+  --chip: #ebe7dc;
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -45,7 +51,7 @@
   --duration: 260ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --nav-h: 76px;
+  --nav-h: 58px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
 }
@@ -67,6 +73,8 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-over: var(--over);
+  --color-bubble: var(--bubble);
+  --color-chip: var(--chip);
   --font-display: var(--font-literata), ui-serif, Georgia, serif;
   --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", Menlo, monospace;
   /* SF Pro on iPhone: native, zero download, best Cyrillic rendering at UI sizes */
@@ -233,6 +241,55 @@ body::before {
 }
 @keyframes blink {
   50% { opacity: 0; }
+}
+
+/* Chat: popover menu grows from the "+" button (bottom-left origin), like iOS menus */
+.menu-pop {
+  transform-origin: 12% 100%;
+  animation: menu-pop var(--duration) var(--ease-out-expo);
+}
+@keyframes menu-pop {
+  from { opacity: 0; transform: scale(0.9) translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+.thumb-in {
+  animation: thumb-in var(--duration) var(--ease-out-expo);
+}
+@keyframes thumb-in {
+  from { opacity: 0; transform: scale(0.86); }
+  to { opacity: 1; transform: none; }
+}
+
+/* "Thinking" status: a light sweep over the text */
+.shimmer {
+  background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink-3) 40%, var(--ink) 50%, var(--ink-3) 60%, var(--ink-3) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 110% 0; }
+  to { background-position: -110% 0; }
+}
+
+/* Waiting for the first token: a breathing dot */
+.pulse-dot {
+  animation: pulse-dot 1.1s var(--ease-out-expo) infinite alternate;
+}
+@keyframes pulse-dot {
+  from { transform: scale(0.72); opacity: 0.55; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.drawer-in {
+  animation: drawer-in var(--duration) var(--ease-out-expo);
+}
+@keyframes drawer-in {
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: none; }
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }

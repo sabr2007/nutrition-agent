@@ -8,10 +8,10 @@
 | Прод-URL | https://ryadom-coach.vercel.app (алиас `ryadom-delta.vercel.app`) | ✓ |
 | Supabase | проект `ryadom-nutrition` (eu-central-1): 9 миграций, регистрация закрыта, cron каждые 5 минут, секреты cron в Vault | ✓ |
 | Аккаунт владельца | создан через Admin API, личный план из `scripts/personal-seed.json` | ✓ |
-| Vercel env (prod + preview) | Supabase URL/ключи, VAPID, CRON_SECRET, APP_ENCRYPTION_KEY, APP_URL, CLOUDFLARE_*, LLM_PROVIDER_ORDER, LLM_DISABLE_GATEWAY, RECOGNITION_SAMPLES | ✓ |
-| Cloudflare API-токен | только Workers AI Read/Write + AI Gateway Read/Run, имя «ryadom-nutrition-agent (Workers AI)» | ✓ |
+| Vercel env (prod + preview) | Supabase URL/ключи, VAPID, CRON_SECRET, APP_ENCRYPTION_KEY, APP_URL, CLOUDFLARE_* (только голос). Старые `LLM_PROVIDER_ORDER`, `LLM_DISABLE_GATEWAY`, `RECOGNITION_SAMPLES`, `CHATGPT_PLAN_ENABLED` код больше не читает — их можно удалить | ✓ |
+| Cloudflare API-токен | только Workers AI (расшифровка голоса), имя «ryadom-nutrition-agent (Workers AI)» | ✓ |
 | GitHub Actions | секреты `SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD` | ✓ |
-| ChatGPT plan | подключён 24.11, `CHATGPT_PLAN_ENABLED=1` — см. §3 | ✓ |
+| ChatGPT plan | подключён 24.11, единственный провайдер моделей — см. §3 | ✓ |
 
 ## 1. Прод-база (уже поднята; для повторного запуска или нового окружения)
 ```bash
@@ -42,10 +42,10 @@
    ```
    `--email` — логин от «Рядом», а не почта ChatGPT. Токены уходят на сервер «Рядом» под твоим входом; сервер шифрует их своим ключом.
    Перед ссылкой скрипт проверяет, что сервер принимает вход и может хранить токены. Если отправка всё же сорвётся, токены остаются в памяти процесса, и Enter повторяет её без нового входа в ChatGPT. Адрес сервера берётся из `--app-url`, затем из `APP_URL`, иначе прод; заглушки `[SENSITIVE]` из `vercel env pull` пропускаются.
-4. Включи маршрут: `printf 1 | vercel env add CHATGPT_PLAN_ENABLED production`, затем редеплой.
+4. Отдельно включать ничего не нужно: как только вход сохранён, все модели идут через план (флаг `CHATGPT_PLAN_ENABLED` больше не используется).
 5. Поставь недельный лимит для приложения: ChatGPT → Settings → Usage.
 
-При исчерпании лимита (`429 subscription_sharing_usage_limit_exceeded`) запросы автоматически уходят на следующий провайдер. Выданный OpenAI `client_id` хранится в `scripts/.chatgpt-client.json` (gitignored) и используется при следующих входах.
+Запасных провайдеров нет (решение D22): при исчерпании лимита (`429 subscription_sharing_usage_limit_exceeded`) чат и фото отвечают «лимит исчерпан», ручная запись и шаблоны работают. Проверка подключения и моделей: `POST /api/providers/chatgpt/check` (под своим входом), с телом `{"agent": true}` — ещё и сценарии агента в dry-run. Выданный OpenAI `client_id` хранится в `scripts/.chatgpt-client.json` (gitignored) и используется при следующих входах.
 
 ## 4. Локальная разработка
 ```bash
@@ -59,10 +59,9 @@ pnpm dev
 Тесты: `pnpm test` (unit), `pnpm test:e2e` (Playwright, нужен локальный стек и `E2E_EMAIL`/`E2E_PASSWORD`), eval: см. README.
 
 ## 5. Модели и стоимость
-- Порядок провайдеров — `LLM_PROVIDER_ORDER` (по умолчанию `chatgpt,gateway,openai,workers-ai`); неподключённые пропускаются. Сейчас первым идёт ChatGPT plan, за ним Cloudflare Workers AI; Gateway выключен `LLM_DISABLE_GATEWAY=1`.
-- Workers AI: 10 000 нейронов в сутки бесплатно (сброс 00:00 UTC), сверх — только на Workers Paid ($5/мес, $0.011 за 1000 нейронов). Расход — Cloudflare → AI → Workers AI.
-- Включить Gateway (быстрее фото): карта в Vercel → удалить `LLM_DISABLE_GATEWAY` → Redeploy.
-- Число прогонов на фото — `RECOGNITION_SAMPLES` (1–3, по умолчанию авто). Расход по моделям за 7 дней — «Настройки → Модели».
+- Все модели — на подписке ChatGPT, одна модель на задачу (`src/lib/llm/models.ts`): чат и агент — `gpt-6-luna`, «Думать дольше» — `gpt-6.1-sol`, фото и этикетки — `gpt-6.1-terra`, разбор текста и тексты пушей — `gpt-6-luna`. Доплаты нет, расходуется лимит подписки; поставь недельный лимит для приложения в ChatGPT → Settings → Usage.
+- Голос — Whisper на Cloudflare Workers AI, бесплатно в дневной квоте.
+- Вызовы за 7 дней по моделям — «Настройки → Модели» (стоимость показана по прайсу API, фактически платится подпиской).
 
 ## 6. Экспорт данных
 - В приложении: «Настройки → Экспорт» (ZIP с CSV всех таблиц).

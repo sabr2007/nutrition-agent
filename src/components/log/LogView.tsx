@@ -309,7 +309,7 @@ export function LogView() {
               </ul>
             </section>
           )}
-          <p className="pb-10 text-center text-xs text-ink-3"><Link href="/coach" className="underline decoration-dotted">или просто напиши коучу</Link></p>
+          <p className="pb-10 text-center text-xs text-ink-3"><Link href="/chat" className="underline decoration-dotted">или просто напиши в чат — фото, голос, текст</Link></p>
         </>
       )}
 

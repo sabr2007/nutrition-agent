@@ -1,4 +1,5 @@
 import 'server-only';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { hasPlanScope, type ConnectPayload } from './chatgpt-connect';
 import { decrypt, encrypt } from './crypto';
@@ -11,29 +12,54 @@ import { decrypt, encrypt } from './crypto';
 const TOKEN_URL = 'https://auth.openai.com/api/accounts/oauth/token';
 const RESOURCE = 'https://api.openai.com/v1';
 const TERMINAL = ['invalid_grant', 'invalid_refresh_token', 'token_expired', 'refresh_token_expired', 'refresh_token_invalidated', 'refresh_token_reused'];
+/** Refresh this long before expiry. */
+const REFRESH_MARGIN_MS = 5 * 60_000;
+/** A token this close to expiry is not worth handing to a long agent run. */
+const MIN_USABLE_MS = 15_000;
+const LEASE_MS = 30_000;
+const WAIT_TRIES = 4;
+const WAIT_STEP_MS = 1500;
 
 type Meta = { client_id?: string; earliest_refresh_at?: string | null; refresh_lease_until?: string | null; last_error?: string | null };
+type Connection = { id: string; access_token_enc: string | null; refresh_token_enc: string; expires_at: string | null; meta: Meta; updated_at: string };
 
-export async function getChatgptToken(userId: string): Promise<string | null> {
-  if (process.env.CHATGPT_PLAN_ENABLED !== '1') return null;
-  const admin = supabaseAdmin();
-  const { data: c } = await admin.from('provider_connections').select('*').eq('user_id', userId).eq('provider', 'chatgpt').eq('status', 'connected').maybeSingle();
-  if (!c?.access_token_enc) return null;
-  const expiresAt = c.expires_at ? Date.parse(c.expires_at as string) : 0;
-  if (expiresAt - Date.now() > 5 * 60_000) return decrypt(c.access_token_enc as string);
-  return refresh(userId, c as { id: string; refresh_token_enc: string; meta: Meta; updated_at: string });
+async function readConnection(admin: SupabaseClient, userId: string): Promise<Connection | null> {
+  const { data } = await admin.from('provider_connections').select('id, access_token_enc, refresh_token_enc, expires_at, meta, updated_at')
+    .eq('user_id', userId).eq('provider', 'chatgpt').eq('status', 'connected').maybeSingle();
+  return (data as Connection | null) ?? null;
 }
 
-async function refresh(userId: string, c: { id: string; refresh_token_enc: string; meta: Meta; updated_at: string }): Promise<string | null> {
+const msLeft = (c: Connection) => (c.expires_at ? Date.parse(c.expires_at) : 0) - Date.now();
+
+/** The owner's current plan access token, refreshed when needed; null when not connected. */
+export async function getChatgptToken(userId: string): Promise<string | null> {
   const admin = supabaseAdmin();
+  const c = await readConnection(admin, userId);
+  if (!c?.access_token_enc) return null;
+  if (msLeft(c) > REFRESH_MARGIN_MS) return decrypt(c.access_token_enc);
+  const refreshed = await refresh(admin, c);
+  if (refreshed) return refreshed;
+  // Another request holds the refresh lease, or the refresh failed transiently: the current
+  // token still works until it expires; past that, wait briefly for the other refresh.
+  if (msLeft(c) > MIN_USABLE_MS) return decrypt(c.access_token_enc);
+  for (let i = 0; i < WAIT_TRIES; i++) {
+    await new Promise((r) => setTimeout(r, WAIT_STEP_MS));
+    const next = await readConnection(admin, userId);
+    if (next?.access_token_enc && msLeft(next) > MIN_USABLE_MS) return decrypt(next.access_token_enc);
+  }
+  return null;
+}
+
+async function refresh(admin: SupabaseClient, c: Connection): Promise<string | null> {
   const meta = c.meta ?? {};
   const now = Date.now();
   if (meta.refresh_lease_until && Date.parse(meta.refresh_lease_until) > now) return null; // someone else is refreshing
+  if (!meta.client_id) return null;
   // Acquire the lease with optimistic concurrency on updated_at.
-  const lease = new Date(now + 30_000).toISOString();
+  const lease = new Date(now + LEASE_MS).toISOString();
   const { data: locked } = await admin.from('provider_connections').update({ meta: { ...meta, refresh_lease_until: lease }, updated_at: new Date().toISOString() })
     .eq('id', c.id).eq('updated_at', c.updated_at).select('id');
-  if (!locked?.length || !meta.client_id) return null;
+  if (!locked?.length) return null;
   try {
     const res = await fetch(TOKEN_URL, {
       method: 'POST',

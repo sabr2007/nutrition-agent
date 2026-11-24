@@ -119,7 +119,7 @@ export function TodayView() {
       )}
 
       {s.isToday && isLate(s.profile.timezone) && !s.checklist.find((c) => c.key === 'close_day')?.done && (
-        <Link href="/coach?skill=close_day" className="press surface framed mt-4 flex items-center justify-between p-4">
+        <Link href="/chat?skill=close_day" className="press surface framed mt-4 flex items-center justify-between p-4">
           <span><span className="label">вечер</span><span className="block font-medium">Закрыть день — 30 секунд</span></span>
           <span className="font-mono text-ink-2">→</span>
         </Link>

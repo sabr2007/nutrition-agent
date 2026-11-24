@@ -34,10 +34,12 @@ export async function uploadMedia(userId: string, kind: 'photo' | 'audio' | 'bod
   const sb = supabaseBrowser();
   const day = new Date().toISOString().slice(0, 10);
   const path = `${userId}/${kind}/${day}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await sb.storage.from('media').upload(path, blob, { contentType: blob.type || (kind === 'audio' ? 'audio/mp4' : 'image/jpeg'), upsert: false });
+  // Recorders report e.g. "audio/webm;codecs=opus"; the bucket allow-list holds bare types.
+  const mime = (blob.type || (kind === 'audio' ? 'audio/mp4' : 'image/jpeg')).split(';')[0].trim();
+  const { error } = await sb.storage.from('media').upload(path, blob, { contentType: mime, upsert: false });
   if (error) throw new Error(`Не удалось загрузить файл: ${error.message}`);
   const { data, error: e2 } = await sb.from('media').insert({
-    user_id: userId, kind, bucket: 'media', path, mime: blob.type || null, bytes: blob.size,
+    user_id: userId, kind, bucket: 'media', path, mime, bytes: blob.size,
     width: meta.width ?? null, height: meta.height ?? null, duration_ms: meta.duration_ms ?? null, sha256: await sha256(blob),
   }).select('id').single();
   if (e2) throw new Error(e2.message);

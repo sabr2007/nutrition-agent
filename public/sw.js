@@ -1,9 +1,9 @@
 /* Рядом — service worker: offline shell, cached Today data, web push. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `shell-${VERSION}`;
 const STATIC = `static-${VERSION}`;
 const DATA = `data-${VERSION}`;
-const SHELL_URLS = ['/', '/log', '/coach', '/body', '/more', '/login', '/offline'];
+const SHELL_URLS = ['/', '/log', '/chat', '/body', '/more', '/login', '/offline'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

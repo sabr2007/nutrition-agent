@@ -1,30 +1,29 @@
 import { handler, json, requireUser } from '@/lib/http';
 import { encryptionReady } from '@/lib/llm/crypto';
-import { providerStatus } from '@/lib/llm/router';
+import { MODELS } from '@/lib/llm/models';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { serverEnv } from '@/lib/env';
+
+const WEEK_MS = 7 * 86_400_000;
+
+type Usage = { calls: number; errors: number; cost: number };
 
 export const GET = handler(async (req) => {
   const { userId, sb } = await requireUser(req);
-  const env = serverEnv();
-  const { data: conn } = await supabaseAdmin().from('provider_connections').select('provider, status, expires_at, scope, updated_at').eq('user_id', userId);
-  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const { data: calls } = await sb.from('llm_calls').select('provider, model, status, cost_usd, tokens_in, tokens_out').eq('user_id', userId).gte('created_at', since);
-  const usage: Record<string, { calls: number; errors: number; cost: number }> = {};
+  const { data: conn } = await supabaseAdmin().from('provider_connections').select('status, expires_at, updated_at')
+    .eq('user_id', userId).eq('provider', 'chatgpt').maybeSingle();
+  const since = new Date(Date.now() - WEEK_MS).toISOString();
+  const { data: calls } = await sb.from('llm_calls').select('model, status, cost_usd').eq('user_id', userId).gte('created_at', since);
+  const usage: Record<string, Usage> = {};
   for (const c of calls ?? []) {
-    const k = `${c.provider}/${c.model}`;
-    usage[k] ??= { calls: 0, errors: 0, cost: 0 };
-    usage[k].calls++;
-    if (c.status === 'error') usage[k].errors++;
-    usage[k].cost += Number(c.cost_usd ?? 0);
+    const k = c.model as string;
+    const prev = usage[k] ?? { calls: 0, errors: 0, cost: 0 };
+    usage[k] = { calls: prev.calls + 1, errors: prev.errors + (c.status === 'error' ? 1 : 0), cost: prev.cost + Number(c.cost_usd ?? 0) };
   }
   return json({
-    order: env.providerOrder,
-    configured: { gateway: env.gatewayConfigured, openai: Boolean(env.openaiApiKey), workers_ai: Boolean(env.cloudflareApiToken), chatgpt_plan: process.env.CHATGPT_PLAN_ENABLED === '1' },
+    chatgpt: { status: conn?.status ?? 'not_connected', updated_at: conn?.updated_at ?? null },
+    models: Object.fromEntries(Object.entries(MODELS).map(([task, spec]) => [task, spec.model])),
     // Checked by scripts/chatgpt-login.ts before the OpenAI consent, so a bad key fails early.
     token_storage_ready: encryptionReady(),
-    routes: providerStatus(),
-    connections: conn ?? [],
     usage_7d: usage,
   });
 });

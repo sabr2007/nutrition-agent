@@ -76,4 +76,4 @@ export function MealList({ meals, timezone, onChange }: { meals: DayMeal[]; time
   );
 }
 
-const METHOD: Record<string, string> = { photo: 'фото', voice: 'голос', text: 'текст', agent: 'коуч', repeat: 'повтор', barcode: 'штрихкод', scale: 'весы', manual: 'вручную' };
+const METHOD: Record<string, string> = { photo: 'фото', voice: 'голос', text: 'текст', agent: 'чат', repeat: 'повтор', barcode: 'штрихкод', scale: 'весы', manual: 'вручную' };

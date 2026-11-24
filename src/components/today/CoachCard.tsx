@@ -25,10 +25,10 @@ export function CoachCard({ coach, notification, onChange }: { coach: TodayRespo
   }
   if (!coach) return null;
   return (
-    <Link href="/coach" className="press surface mt-4 flex gap-3 p-4">
+    <Link href="/chat" className="press surface mt-4 flex gap-3 p-4">
       <span className="font-mono text-lg" aria-hidden>◇</span>
       <span className="min-w-0 flex-1">
-        <span className="label">коуч</span>
+        <span className="label">чат</span>
         <span className="mt-0.5 line-clamp-3 block text-sm text-ink-2">{coach.text}</span>
       </span>
     </Link>

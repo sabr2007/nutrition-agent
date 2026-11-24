@@ -15,14 +15,9 @@ export function serverEnv() {
     cronSecret: process.env.CRON_SECRET ?? '',
     encryptionKey: process.env.APP_ENCRYPTION_KEY ?? '',
     appUrl: process.env.APP_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : 'http://localhost:3000'),
-    openaiApiKey: process.env.OPENAI_API_KEY ?? '',
-    gatewayConfigured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+    // Speech-to-text only (Whisper): the ChatGPT plan has no transcription.
     cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? '',
     cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? '',
-    chatgptClientId: process.env.CHATGPT_OAUTH_CLIENT_ID ?? '',
-    chatgptClientSecret: process.env.CHATGPT_OAUTH_CLIENT_SECRET ?? '',
-    providerOrder: (process.env.LLM_PROVIDER_ORDER || 'chatgpt,gateway,openai,workers-ai')
-      .split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
 

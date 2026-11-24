@@ -2,17 +2,14 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
 import { genObject } from '@/lib/llm/generate';
-import { candidates, type ModelRef } from '@/lib/llm/providers';
 import { costUsd } from '@/lib/llm/pricing';
 import { itemFromFood, gramsForPortion, r1 } from '@/lib/nutrition/calc';
 import type { Food, MealItemInput } from '@/lib/nutrition/types';
 import { RecognitionOutput, sanitize, type ClarifyingQuestion } from './schema';
 import { PIPELINE_VERSION, PHOTO_PROMPT_VERSION, TEXT_PROMPT_VERSION, photoSystemPrompt, textSystemPrompt, userContext, type Hints } from './prompts';
 import { pickBest, searchFoods, searchFoodsSmart } from './match';
-import { calibrationRatio, clusterRuns, overallAgreement, summarize, type RunItem } from './aggregate';
+import { calibrationRatio, clusterRuns, summarize, type RunItem } from './aggregate';
 import { quickParse } from './quickparse';
-import { getChatgptToken } from '@/lib/llm/chatgpt';
-import { providerHealthy } from '@/lib/llm/router';
 
 export type ProposedItem = MealItemInput & {
   key: string;
@@ -40,10 +37,7 @@ export type RecognitionResult = {
 
 type RunMeta = { provider: string; model: string; latency_ms: number; tokens_in?: number; tokens_out?: number; cost_usd: number; raw?: unknown; error?: string };
 
-// RECOGNITION_SAMPLES: a number (1–3) or "auto". Auto = 2 runs only when two strong vision
-// models are available (an ensemble with a weaker model made results worse in our eval).
-const SAMPLES_ENV = process.env.RECOGNITION_SAMPLES;
-const FIXED_SAMPLES = SAMPLES_ENV && /^\d$/.test(SAMPLES_ENV) ? Math.max(1, Math.min(3, Number(SAMPLES_ENV))) : null;
+const PHOTO_TIMEOUT_MS = 120_000;
 
 /** Frequent foods + recent corrections → prompt context and calibration. */
 export async function personalContext(sb: SupabaseClient, userId: string) {
@@ -147,11 +141,12 @@ async function saveRecognition(sb: SupabaseClient, userId: string, row: Record<s
 }
 
 export async function recognizePhoto(opts: {
-  sb: SupabaseClient; userId: string; images: { data: Uint8Array; mime: string }[]; mediaIds: string[]; hints: Hints; samples?: number;
+  sb: SupabaseClient; userId: string; images: { data: Uint8Array; mime: string }[]; mediaIds: string[]; hints: Hints;
 }): Promise<RecognitionResult> {
   const t0 = Date.now();
   const ctx = await personalContext(opts.sb, opts.userId);
   const hints: Hints = { ...opts.hints, frequentFoods: ctx.frequentFoods, corrections: ctx.corrections };
+  const kind = opts.hints.mode === 'scale' ? 'scale' : 'photo';
   const userText = ['Распознай еду на фото.', userContext(hints)].filter(Boolean).join('\n');
   const messages: ModelMessage[] = [{
     role: 'user',
@@ -161,83 +156,57 @@ export async function recognizePhoto(opts: {
     ],
   }];
 
-  // Self-consistency: run N samples in parallel, preferring different models (ensemble).
-  const chatgptAccessToken = await getChatgptToken(opts.userId).catch(() => null);
-  const pool = candidates('vision', { chatgptAccessToken });
-  const distinct: ModelRef[] = [];
-  for (const c of pool) if (!distinct.some((d) => d.model === c.model)) distinct.push(c);
-  const strong = distinct.filter((c) => c.provider !== 'workers-ai' && providerHealthy(c.provider));
-  const n = opts.samples ?? FIXED_SAMPLES ?? (strong.length >= 2 ? 2 : 1);
-  const runs = await Promise.allSettled(Array.from({ length: n }, (_, i) =>
-    genObject({
+  let attempt;
+  try {
+    attempt = await genObject({
       task: 'vision',
       log: { userId: opts.userId, purpose: 'vision' },
       system: photoSystemPrompt(),
       messages,
       schema: RecognitionOutput,
-      prefer: distinct[i % Math.max(1, distinct.length)],
-      temperature: i === 0 ? 0.2 : 0.7,
-      timeoutMs: 120_000,
-      ctx: { chatgptAccessToken },
-    }),
-  ));
-
-  const runMeta: RunMeta[] = [];
-  const outputs: RecognitionOutput[] = [];
-  for (const r of runs) {
-    if (r.status === 'fulfilled') {
-      const out = sanitize(r.value.result);
-      outputs.push(out);
-      runMeta.push({
-        provider: r.value.ref.provider, model: r.value.ref.model, latency_ms: r.value.latencyMs,
-        tokens_in: r.value.usage?.inputTokens, tokens_out: r.value.usage?.outputTokens,
-        cost_usd: costUsd(r.value.ref.model, r.value.usage?.inputTokens, r.value.usage?.outputTokens), raw: out,
-      });
-    } else {
-      runMeta.push({ provider: '-', model: '-', latency_ms: 0, cost_usd: 0, error: String((r.reason as Error)?.message ?? r.reason).slice(0, 300) });
-    }
-  }
-  if (!outputs.length) {
-    await saveRecognition(opts.sb, opts.userId, {
-      kind: opts.hints.mode === 'scale' ? 'scale' : 'photo', media_ids: opts.mediaIds, hints: opts.hints, pipeline_version: PIPELINE_VERSION,
-      prompt_version: PHOTO_PROMPT_VERSION, runs: runMeta, status: 'error', error: runMeta.map((m) => m.error).join(' | '), latency_ms: Date.now() - t0,
+      timeoutMs: PHOTO_TIMEOUT_MS,
     });
-    throw new Error('Не получилось распознать фото: модели недоступны. Попробуй текстом или шаблоном.');
+  } catch (err) {
+    await saveRecognition(opts.sb, opts.userId, {
+      kind, media_ids: opts.mediaIds, hints: opts.hints, pipeline_version: PIPELINE_VERSION,
+      prompt_version: PHOTO_PROMPT_VERSION, runs: [], status: 'error', error: (err as Error).message.slice(0, 300), latency_ms: Date.now() - t0,
+    });
+    throw err;
   }
+  const out = sanitize(attempt.result);
+  const run: RunMeta = {
+    provider: 'chatgpt', model: attempt.model, latency_ms: attempt.latencyMs,
+    tokens_in: attempt.usage?.inputTokens, tokens_out: attempt.usage?.outputTokens,
+    cost_usd: costUsd(attempt.model, attempt.usage?.inputTokens, attempt.usage?.outputTokens), raw: out,
+  };
 
   const cache = new Map<string, Food[]>();
-  const matched = await Promise.all(outputs.map((o, i) => matchItems(opts.sb, o.items, i, cache, ctx.preferred)));
-  const summaries = clusterRuns(matched).map((c) => summarize(c, outputs.length))
-    // drop items that only one of several runs hallucinated with low confidence
-    .filter((s) => !(outputs.length > 1 && s.presence < 0.5 && s.confidence < 0.25));
+  const matched = await matchItems(opts.sb, out.items, 0, cache, ctx.preferred);
+  const summaries = clusterRuns([matched]).map((c) => summarize(c, 1));
   let items = toProposed(summaries, cache, ctx.calibration, 'model');
 
   // Kitchen-scale mode: a visible reading is the ground truth for a single item.
-  const reading = outputs.map((o) => o.scale_reading_g).find((x): x is number => typeof x === 'number' && x > 0) ?? null;
+  const reading = typeof out.scale_reading_g === 'number' && out.scale_reading_g > 0 ? out.scale_reading_g : null;
   if (reading && items.length === 1 && items[0].per100) {
     const it = items[0];
     items = [{ ...it, ...itemFromFood({ ...(cache.get(it.food_query.trim())?.find((f) => f.id === it.food_id) as Food) }, reading, { source: 'scale', confidence: 0.95, model_grams: it.model_grams, model_label: it.label }), key: it.key, label: it.label, food_query: it.food_query, grams_low: reading, grams_high: reading, presence: 1, unmatched: false, alternatives: it.alternatives }];
   }
 
-  const agreement = outputs.length > 1 ? overallAgreement(summaries) : null;
-  const modelConf = outputs.reduce((a, o) => a + o.overall_confidence, 0) / outputs.length;
   const kcalTotal = items.reduce((a, i) => a + i.kcal, 0) || 1;
   const itemConf = items.reduce((a, i) => a + (i.confidence ?? 0) * Math.max(i.kcal, 1), 0) / kcalTotal;
-  const confidence = Number(Math.min(modelConf, agreement ?? 1, itemConf || modelConf).toFixed(3));
-  const modelQuestions = outputs.flatMap((o) => o.questions).filter((q, i, arr) => arr.findIndex((x) => x.text === q.text) === i);
-  const questions = confidence < 0.75 ? autoQuestions(items, modelQuestions) : modelQuestions.slice(0, 1);
+  const confidence = Number(Math.min(out.overall_confidence, itemConf || out.overall_confidence).toFixed(3));
+  const questions = confidence < 0.75 ? autoQuestions(items, out.questions) : out.questions.slice(0, 1);
 
   const recognitionId = await saveRecognition(opts.sb, opts.userId, {
-    kind: opts.hints.mode === 'scale' ? 'scale' : 'photo', media_ids: opts.mediaIds, hints: opts.hints,
-    pipeline_version: PIPELINE_VERSION, prompt_version: PHOTO_PROMPT_VERSION, runs: runMeta,
-    result: { items, scale_reading_g: reading, notes: outputs[0].notes, hidden: outputs.flatMap((o) => o.hidden_ingredients) },
-    agreement, confidence, questions, status: 'done', latency_ms: Date.now() - t0,
-    cost_usd: runMeta.reduce((a, m) => a + m.cost_usd, 0),
+    kind, media_ids: opts.mediaIds, hints: opts.hints,
+    pipeline_version: PIPELINE_VERSION, prompt_version: PHOTO_PROMPT_VERSION, runs: [run],
+    result: { items, scale_reading_g: reading, notes: out.notes, hidden: out.hidden_ingredients },
+    agreement: null, confidence, questions, status: 'done', latency_ms: Date.now() - t0, cost_usd: run.cost_usd,
   });
 
   return {
-    recognitionId, kind: opts.hints.mode === 'scale' ? 'scale' : 'photo', items, questions, confidence, agreement,
-    scaleReadingG: reading, notes: outputs[0].notes, usedLlm: true, models: runMeta.filter((m) => !m.error).map((m) => m.model),
+    recognitionId, kind, items, questions, confidence, agreement: null,
+    scaleReadingG: reading, notes: out.notes, usedLlm: true, models: [attempt.model],
   };
 }
 
@@ -282,15 +251,12 @@ export async function parseFoodText(opts: {
   }
 
   const hints: Hints = { ...(opts.hints ?? {}), frequentFoods: ctx.frequentFoods, corrections: ctx.corrections };
-  const chatgptAccessToken = await getChatgptToken(opts.userId).catch(() => null);
   const res = await genObject({
-    ctx: { chatgptAccessToken },
     task: 'parse',
     log: { userId: opts.userId, purpose: opts.kind === 'voice' ? 'parse_voice' : 'parse_text' },
     system: textSystemPrompt(),
     messages: [{ role: 'user', content: `${userContext(hints)}\n\nТекст: «${text.slice(0, 1500)}»` }],
     schema: RecognitionOutput,
-    temperature: 0.1,
   });
   const out = sanitize(res.result);
   const matched = await matchItems(opts.sb, out.items, 0, cache, ctx.preferred);
@@ -299,14 +265,14 @@ export async function parseFoodText(opts: {
   const confidence = Number(Math.min(out.overall_confidence, ...items.map((i) => i.confidence ?? 0.5), 1).toFixed(3));
   const questions = autoQuestions(items, out.questions).slice(0, 2);
   const runMeta: RunMeta[] = [{
-    provider: res.ref.provider, model: res.ref.model, latency_ms: res.latencyMs,
+    provider: 'chatgpt', model: res.model, latency_ms: res.latencyMs,
     tokens_in: res.usage?.inputTokens, tokens_out: res.usage?.outputTokens,
-    cost_usd: costUsd(res.ref.model, res.usage?.inputTokens, res.usage?.outputTokens), raw: out,
+    cost_usd: costUsd(res.model, res.usage?.inputTokens, res.usage?.outputTokens), raw: out,
   }];
   const recognitionId = await saveRecognition(opts.sb, opts.userId, {
     kind: opts.kind, media_ids: opts.mediaIds ?? [], input_text: text, transcript: opts.transcript ?? null,
     pipeline_version: PIPELINE_VERSION, prompt_version: TEXT_PROMPT_VERSION, runs: runMeta, result: { items },
     confidence, questions, status: 'done', latency_ms: Date.now() - t0, cost_usd: runMeta[0].cost_usd,
   });
-  return { recognitionId, kind: opts.kind, items, questions, confidence, agreement: null, scaleReadingG: null, notes: out.notes, usedLlm: true, models: [res.ref.model] };
+  return { recognitionId, kind: opts.kind, items, questions, confidence, agreement: null, scaleReadingG: null, notes: out.notes, usedLlm: true, models: [res.model] };
 }
