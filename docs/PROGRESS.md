@@ -1,4 +1,48 @@
-# Прогресс v1
+# Прогресс
+
+## v2: «Рядом» в Telegram
+
+Задача — `docs/V2_TASK.md` (локально), цикл PLAN → BUILD → VERIFY → DEPLOY → CHECK. Обновлено: 2026-11-26, ночь.
+
+### Фазы
+| Фаза | Статус | Что сделано и чем доказано | Главные файлы |
+|---|---|---|---|
+| До v2: матчинг продуктов (D24, баг Fuse Tea) | ✅ | Гейт релевантности, `needs_food`, `save_user_food`, названия из состава, `edit_meal` с `replace` и чтением из базы, откат своей ошибки ≤ 30 мин. Миграция `20261126000100` в проде (проверено SQL: БЖУ nullable, индекс, журнал, `search_foods` отдаёт алиасы). Калибровка на 190 запросах против прод-поиска: 147 верных совпадений, 43 честных `needs_food`, 0 подмен. Unit 126/126. Прод-деплой `158b3c3` + `9bddcfd`; eval в проде (dry-run, `gpt-6-luna`): 4/4 новых сценария, полный набор 14/15 → после правки промпта (agent-v5) провал `crash_diet` закрыт (3/3 на перепроверке). Строки — в `docs/research/agent-evals.md` | `src/lib/recognition/relevance.ts`, `src/lib/agent/meal-tools.ts`, `meal-title.ts`, `dry-world.ts`, `src/lib/nutrition/user-food.ts` |
+| 0. Аудит и базовая линия | 🟡 | Доки и код прочитаны. Базовая линия до v2: typecheck ✓, unit 78/78, lint — 8 старых ошибок (`LogView`, `FoodSearch`, `AuthGate`; первые два удаляются в фазе 6), CI lint не запускает; eval 11/11 (24.11). Исследования: `docs/research/telegram-bot-api.md`, `docs/research/google-health-api.md`. Секреты бота и Google в Vercel. Замеры «до» — в работе | `docs/PERF.md` |
+| 1. Бот: транспорт и доступ | ⏳ | | `src/app/api/telegram/webhook/route.ts`, `src/lib/telegram/*`, миграция `tg_updates`, `scripts/telegram-setup.ts` |
+| 2. Бот: полноценный ввод | ⏳ | | `src/lib/telegram/{media,format,keyboards,callbacks,commands}.ts` |
+| 3. Модель и умения | ⏳ | | `src/lib/llm/models.ts`, `lookup_product`, жиры, белок на 100 ккал, eval |
+| 4. Google Health | ⏳ | | `src/lib/health/*`, `src/app/api/health/google/*`, `health_daily`, `health_sleep` |
+| 5. Проактивность в Telegram | ⏳ | | `src/lib/reminders/engine.ts`, доставка в Telegram, лимиты |
+| 6. Mini App | ⏳ | | Telegram WebApp SDK, `/api/telegram/auth`, CSP/iframe, удаление чата, «+», `/log`, чек-листа |
+| 7. Производительность | ⏳ | | `docs/PERF.md` |
+| 8. Финал | ⏳ | | DoD в проде, secret scan, документация, `docs/SUMMARY.md` |
+
+### Definition of Done
+| # | Пункт | Статус | Доказательство |
+|---|---|---|---|
+| 1 | Только владелец; чужой `user_id` → отказ без LLM | ⏳ | |
+| 2 | «грудка 250, рис 150» → приём, карточка, Mini App | ⏳ | |
+| 3 | Голосовое → расшифровка → приём | ⏳ | |
+| 4 | Фото тарелки → `input_method='photo'`, `recognitions`, `media` | ⏳ | |
+| 5 | Продукт на весах → вес, продукт найден, `foods.source_ref` | ⏳ | |
+| 6 | Альбом 2–4 фото → один ход | ⏳ | |
+| 7 | Inline-кнопки, `answerCallbackQuery` < 1 с, без дублей | ⏳ | |
+| 8 | Жирный приём → одно предупреждение с заменой | ⏳ | |
+| 9 | «Что съесть на ужин?» → граммы, белок на 100 ккал, «Записать» | ⏳ | |
+| 10 | Google Health подключён или код готов | ⏳ | |
+| 11 | Проактивность в Telegram, лимиты | ⏳ | |
+| 12 | Дубликат `update_id`, повтор упавшего апдейта | ⏳ | |
+| 13 | Mini App из menu button, вход по `initData`, iOS + Web | ⏳ | |
+| 14 | Нет «Чата», «+», `/log`, чек-листа, `PushPrompt` | ⏳ | |
+| 15 | Цели производительности, «до/после» | ⏳ | |
+| 16 | typecheck, lint, test, e2e, eval, CI — зелёные | ⏳ | |
+| 17 | Секретов в репозитории нет, `.env.example` полный | ⏳ | |
+| 18 | Документация актуальна | ⏳ | |
+
+---
+
+## v1
 
 Обновлено: 2026-11-24, вечер.
 

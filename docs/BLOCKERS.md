@@ -1,5 +1,29 @@
 # Блокеры и шаги владельца
 
+## v2: шаги владельца (Telegram и Google Health)
+
+Обновлено: 26.11.2026, ночь. Всё остальное я делаю сам и продолжаю независимые пункты, пока эти шаги не сделаны.
+
+| # | Что | Статус |
+|---|---|---|
+| 1 | Токен бота в Vercel env | ✅ `TELEGRAM_BOT_TOKEN` в Vercel **не было** — добавил сам (production + preview) из твоего сообщения; `TELEGRAM_WEBHOOK_SECRET` и `TELEGRAM_PAIRING_CODE` сгенерировал и добавил туда же |
+| 2 | Привязать бота: отправить ему `/start <код>` | ⏳ код — в `.env.local` на твоём Mac (`TELEGRAM_PAIRING_CODE`), в репозиторий он не попадает. Отправлять после того, как бот заработает (фаза 1, отмечу здесь) |
+| 3 | Google Cloud + Google Health | 🟡 OAuth-клиент создан, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` добавил в Vercel (production). Осталось — ниже |
+| 4 | Ключ поискового API | ⏳ нужен, только если встроенный web search плана ChatGPT недоступен (проверю в фазе 3) |
+| 5 | Фото продукта на кухонных весах для eval (2–3 шт.) | по желанию, если синтетических фикстур не хватит |
+
+### 3. Google Health — что осталось сделать в Google Cloud Console (тот же проект, где OAuth-клиент)
+1. **APIs & Services → Library** → найти **Google Health API** (`health.googleapis.com`) → Enable.
+2. **Google Auth Platform → Data Access** → Add or remove scopes → найти «Google Health API» → отметить `…/auth/googlehealth.activity_and_fitness.readonly`, `…/auth/googlehealth.health_metrics_and_measurements.readonly`, `…/auth/googlehealth.sleep.readonly`, `…/auth/googlehealth.settings.readonly` → Save.
+3. **Clients → твой Web-клиент → Authorized redirect URIs** → добавить `https://ryadom-coach.vercel.app/api/health/google/callback` → Save.
+4. **Audience**: у приложения в режиме Testing refresh-токен живёт только **7 дней** (потом пришлось бы входить заново). Нажми **Publish app → In production** (верификация не нужна, пока пользователей меньше 100; при входе Google покажет «приложение не проверено» → «Дополнительно» → «Перейти»). Если хочешь остаться в Testing — добавь себя в Test users и раз в неделю нажимай «Подключить» заново.
+5. **Телефон**: поставь приложение **Google Health**, войди тем же Google-аккаунтом, создай профиль (или перенеси Fitbit-аккаунт), проверь, что браслет синхронизируется.
+6. Когда я выкачу Mini App (фаза 6): «Ещё → Настройки → Google Health → Подключить» (откроется во внешнем браузере).
+
+---
+
+## v1
+
 Обновлено: 24 ноября 2026, вечер. Прод работает полностью: база Supabase поднята, аккаунт создан, cron каждые 5 минут шлёт напоминания. Ниже — только то, что могу сделать не я, по порядку пользы.
 
 ## 1. «Войти через ChatGPT» (оплата лимитом подписки) — подключено ✅, это единственный провайдер
