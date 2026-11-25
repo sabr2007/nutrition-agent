@@ -354,7 +354,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
     }),
 
     ask_user: tool({
-      description: 'Show the user 2–4 quick-reply buttons for a short question. Use instead of open questions when options are clear.',
+      description: 'Show the user 2–4 quick-reply buttons for a short question. Use instead of open questions when options are clear. The question is shown right above the buttons — do not repeat it in your reply.',
       inputSchema: z.object({ question: z.string().max(200), options: z.array(z.string().max(40)).min(2).max(4) }),
       execute: async ({ question, options }) => {
         ctx.ui.choices = { question, options };

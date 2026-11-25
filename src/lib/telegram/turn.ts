@@ -3,7 +3,8 @@ import type { AgentImage, AgentOptions, AgentResult } from '@/lib/agent/run';
 import type { BotApi } from './bot';
 import { handleCallback } from './callbacks';
 import { handleCommand } from './commands';
-import { sendAgentReply } from './reply';
+import { buildOfflineReply, AGENT_DOWN, type OfflineOffer } from './offline';
+import { sendAgentReply, sendBuilt } from './reply';
 import type { Owner, StoredUpdate, TgStore } from './store';
 import { createStreamer } from './stream';
 import { bestPhoto, classify } from './update';
@@ -23,6 +24,8 @@ export type TurnDeps = {
   runAgent: (opts: AgentOptions) => Promise<AgentResult>;
   savePhoto: (sb: SupabaseClient, userId: string, bot: BotApi, fileId: string, caption: string) => Promise<AgentImage>;
   transcribeVoice: (sb: SupabaseClient, userId: string, bot: BotApi, v: VoiceNote) => Promise<{ text: string; mediaId: string }>;
+  /** The free paths (quick parser, templates) for when the agent is out. */
+  offlineOffer: (sb: SupabaseClient, userId: string, text: string) => Promise<OfflineOffer>;
   now?: () => Date;
 };
 
@@ -53,6 +56,11 @@ export async function runTurn(batch: StoredUpdate[], owner: Owner, deps: TurnDep
         deep: state.deepNext, skillKey: extra.skillKey ?? null, channel: 'telegram', onEvent: (e) => streamer.event(e),
       });
       await streamer.stop();
+      if (r.decision === 'error' && r.errorClass && AGENT_DOWN.has(r.errorClass)) {
+        const offer = await deps.offlineOffer(await userClient(), owner.userId, extra.images?.length ? '' : text);
+        await sendBuilt({ bot: deps.bot, store: deps.store, chatId }, buildOfflineReply(r.errorClass, offer, { userId: owner.userId, chatId }));
+        return { runId: r.runId };
+      }
       await sendAgentReply({ bot: deps.bot, store: deps.store, userId: owner.userId, chatId, appUrl: deps.appUrl }, r, { prefix: extra.prefix });
       return { runId: r.runId };
     } finally {

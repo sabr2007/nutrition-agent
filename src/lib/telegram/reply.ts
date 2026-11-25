@@ -86,7 +86,11 @@ export async function sendHtml(bot: BotApi, chatId: number, html: string, keyboa
 
 /** Sends the agent's reply; buttons go on the last message. Returns the sent message ids. */
 export async function sendAgentReply(ctx: ReplyCtx, r: AgentResult, opts: { prefix?: string } = {}): Promise<number[]> {
-  const built = buildReply(r, ctx, opts);
+  return sendBuilt(ctx, buildReply(r, ctx, opts));
+}
+
+/** Saves the buttons' payloads, then sends the messages with the keyboard under the last one. */
+export async function sendBuilt(ctx: Pick<ReplyCtx, 'bot' | 'store' | 'chatId'>, built: BuiltReply): Promise<number[]> {
   await ctx.store.saveCallbacks(built.callbacks);
   const ids: number[] = [];
   for (let i = 0; i < built.messages.length; i++) {

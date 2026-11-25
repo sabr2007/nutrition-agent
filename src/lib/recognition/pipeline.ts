@@ -9,7 +9,7 @@ import { RecognitionOutput, sanitize, type ClarifyingQuestion } from './schema';
 import { PIPELINE_VERSION, PHOTO_PROMPT_VERSION, TEXT_PROMPT_VERSION, photoSystemPrompt, textSystemPrompt, userContext, type Hints } from './prompts';
 import { pickBest, searchFoods, searchFoodsSmart } from './match';
 import { calibrationRatio, clusterRuns, summarize, type RunItem } from './aggregate';
-import { quickParse } from './quickparse';
+import { quickParse, type QuickSegment } from './quickparse';
 
 export type ProposedItem = MealItemInput & {
   key: string;
@@ -210,6 +210,30 @@ export async function recognizePhoto(opts: {
   };
 }
 
+export type QuickMatch = { seg: QuickSegment; food: Food; grams: number };
+
+const QUICK_MIN_QUALITY = 0.7;
+
+/**
+ * The free path: simple text («грудка 250, рис 150») resolved against the base without any model.
+ * Null when the text is not simple or any part is unsure. Also what the bot offers when the
+ * ChatGPT plan is out.
+ */
+export async function quickMatch(sb: SupabaseClient, text: string, preferred?: Map<string, number>, cache = new Map<string, Food[]>()): Promise<QuickMatch[] | null> {
+  const segments = quickParse(text.trim());
+  if (!segments) return null;
+  const resolved = await Promise.all(segments.map(async (seg) => {
+    const results = await searchFoods(sb, seg.query, 6);
+    cache.set(seg.query, results);
+    return { seg, best: pickBest(results, seg.state, preferred, seg.query) };
+  }));
+  if (!resolved.every((r) => r.best && r.best.quality >= QUICK_MIN_QUALITY)) return null;
+  return resolved.map(({ seg, best }) => {
+    const food = best!.food;
+    return { seg, food, grams: seg.grams ?? (seg.count ? gramsForPortion(food, seg.count) : null) ?? Number(food.default_portion_g ?? 100) };
+  });
+}
+
 /** Text or voice transcript → items. Simple inputs skip the LLM entirely. */
 export async function parseFoodText(opts: {
   sb: SupabaseClient; userId: string; text: string; kind: 'text' | 'voice'; mediaIds?: string[]; transcript?: string | null; hints?: Hints;
@@ -218,36 +242,26 @@ export async function parseFoodText(opts: {
   const text = opts.text.trim();
   const cache = new Map<string, Food[]>();
 
-  const quick = quickParse(text);
   const ctx = await personalContext(opts.sb, opts.userId);
+  const quick = await quickMatch(opts.sb, text, ctx.preferred, cache);
   if (quick) {
-    const resolved = await Promise.all(quick.map(async (seg) => {
-      const results = await searchFoods(opts.sb, seg.query, 6);
-      cache.set(seg.query, results);
-      const best = pickBest(results, seg.state, ctx.preferred, seg.query);
-      return { seg, best };
-    }));
-    if (resolved.every((r) => r.best && r.best.quality >= 0.7)) {
-      const items: ProposedItem[] = resolved.map(({ seg, best }, idx) => {
-        const food = best!.food;
-        const grams = seg.grams ?? (seg.count ? gramsForPortion(food, seg.count) : null) ?? Number(food.default_portion_g ?? 100);
-        const conf = seg.grams ? 0.9 : seg.count ? 0.8 : 0.6;
-        const base = itemFromFood(food, grams, { source: 'user', confidence: conf });
-        return {
-          ...base, key: `q${idx}`, label: food.name_ru, food_query: seg.query,
-          grams_low: r1(grams * (seg.grams ? 1 : 0.7)), grams_high: r1(grams * (seg.grams ? 1 : 1.4)),
-          presence: 1, unmatched: false,
-          alternatives: (cache.get(seg.query) ?? []).filter((f) => f.id !== food.id).slice(0, 4).map((f) => ({ id: f.id, name_ru: f.name_ru, state: f.state })),
-        };
-      });
-      const confidence = Math.min(...items.map((i) => i.confidence ?? 0.6));
-      const recognitionId = await saveRecognition(opts.sb, opts.userId, {
-        kind: opts.kind, media_ids: opts.mediaIds ?? [], input_text: text, transcript: opts.transcript ?? null,
-        pipeline_version: PIPELINE_VERSION, prompt_version: 'quickparse-v1', runs: [], result: { items },
-        confidence, status: 'done', latency_ms: Date.now() - t0, cost_usd: 0,
-      });
-      return { recognitionId, kind: opts.kind, items, questions: [], confidence, agreement: null, scaleReadingG: null, notes: null, usedLlm: false, models: [] };
-    }
+    const items: ProposedItem[] = quick.map(({ seg, food, grams }, idx) => {
+      const conf = seg.grams ? 0.9 : seg.count ? 0.8 : 0.6;
+      const base = itemFromFood(food, grams, { source: 'user', confidence: conf });
+      return {
+        ...base, key: `q${idx}`, label: food.name_ru, food_query: seg.query,
+        grams_low: r1(grams * (seg.grams ? 1 : 0.7)), grams_high: r1(grams * (seg.grams ? 1 : 1.4)),
+        presence: 1, unmatched: false,
+        alternatives: (cache.get(seg.query) ?? []).filter((f) => f.id !== food.id).slice(0, 4).map((f) => ({ id: f.id, name_ru: f.name_ru, state: f.state })),
+      };
+    });
+    const confidence = Math.min(...items.map((i) => i.confidence ?? 0.6));
+    const recognitionId = await saveRecognition(opts.sb, opts.userId, {
+      kind: opts.kind, media_ids: opts.mediaIds ?? [], input_text: text, transcript: opts.transcript ?? null,
+      pipeline_version: PIPELINE_VERSION, prompt_version: 'quickparse-v1', runs: [], result: { items },
+      confidence, status: 'done', latency_ms: Date.now() - t0, cost_usd: 0,
+    });
+    return { recognitionId, kind: opts.kind, items, questions: [], confidence, agreement: null, scaleReadingG: null, notes: null, usedLlm: false, models: [] };
   }
 
   const hints: Hints = { ...(opts.hints ?? {}), frequentFoods: ctx.frequentFoods, corrections: ctx.corrections };

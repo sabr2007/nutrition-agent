@@ -145,6 +145,10 @@ function harness(opts: { agent?: (o: AgentOptions) => Promise<AgentResult>; reje
     runAgent: async (o) => { agentCalls.push(o); return opts.agent ? opts.agent(o) : agentResult(`Ответ на: ${o.userText}`); },
     savePhoto: async (_sb, _u, _b, fileId) => ({ mediaId: `m-${fileId}`, path: `p/${fileId}`, data: new Uint8Array([1]), mime: 'image/jpeg' }),
     transcribeVoice: async () => ({ text: 'съел 200 г гречки', mediaId: 'a-1' }),
+    offlineOffer: async (_sb, _u, text) => ({
+      quick: text.includes('грудка') ? { title: 'Куриная грудка 250 г', kcal: 283, items: [{ food_id: 'f-1', name: 'Куриная грудка', grams: 250 }] } : null,
+      templates: [{ id: 't-1', name: 'Завтрак обычный', kcal: 520 }],
+    }),
   };
   const worker: WorkerDeps = { store, bot, turn: (b, o) => runTurn(b, o, turn), albumWindowMs: 0, sleep: async () => undefined };
   const webhook: WebhookDeps = {
@@ -284,6 +288,40 @@ describe('turns', () => {
     const reply = h.sent.find((s) => s.method === 'sendMessage')!;
     expect(reply.opts?.parse_mode).toBeUndefined();
     expect(reply.text).toBe('Ответ на: привет');
+  });
+});
+
+describe('agent out (ChatGPT limit spent)', () => {
+  const quotaResult = (o: AgentOptions): AgentResult => ({ ...agentResult('Лимит подписки ChatGPT сейчас исчерпан.'), decision: 'error', errorClass: 'quota', model: null, messageId: null, userText: o.userText } as AgentResult);
+  test('simple text: the quick parser offers a one-tap log, templates follow', async () => {
+    const h = harness({ agent: async (o) => quotaResult(o) });
+    h.pairOwner();
+    await handleWebhook(post(msg(OWNER_TG, { text: 'грудка 250' })), h.webhook);
+    await h.drain();
+    const reply = h.sent.filter((s) => s.method === 'sendMessage').at(-1)!;
+    expect(reply.text).toContain('Лимит подписки ChatGPT сейчас исчерпан');
+    expect(reply.text).toContain('Куриная грудка 250 г — 283 ккал');
+    const rows = (reply.opts?.reply_markup as InlineKeyboard).inline_keyboard.map((r) => r[0].text);
+    expect(rows).toEqual(['Записать · 283 ккал', 'Завтрак обычный · 520 ккал']);
+    const kinds = [...h.store.callbacks.values()].map((c) => c.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['log_option', 'template']));
+  });
+  test('text the parser cannot read: a hint and templates, nothing invented', async () => {
+    const h = harness({ agent: async (o) => quotaResult(o) });
+    h.pairOwner();
+    await handleWebhook(post(msg(OWNER_TG, { text: 'что-то вкусное у бабушки' })), h.webhook);
+    await h.drain();
+    const reply = h.sent.filter((s) => s.method === 'sendMessage').at(-1)!;
+    expect(reply.text).toContain('«грудка 250, рис 150»');
+    expect((reply.opts?.reply_markup as InlineKeyboard).inline_keyboard.map((r) => r[0].text)).toEqual(['Завтрак обычный · 520 ккал']);
+  });
+  test('a transient error is not the offline mode', async () => {
+    const h = harness({ agent: async (o) => ({ ...quotaResult(o), errorClass: 'timeout', text: 'Модель не ответила вовремя.' }) });
+    h.pairOwner();
+    await handleWebhook(post(msg(OWNER_TG, { text: 'грудка 250' })), h.webhook);
+    await h.drain();
+    const reply = h.sent.filter((s) => s.method === 'sendMessage').at(-1)!;
+    expect(reply.text).toBe('Модель не ответила вовремя.');
   });
 });
 

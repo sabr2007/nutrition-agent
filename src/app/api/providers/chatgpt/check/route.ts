@@ -15,7 +15,8 @@ import type { AgentImage } from '@/lib/agent/run';
 import { productTools } from '@/lib/agent/product-tools';
 import { emptyUi } from '@/lib/agent/tool-ctx';
 import { newDryWorld } from '@/lib/agent/dry-world';
-import { getProfile } from '@/lib/data/profile';
+import { getProfile, todayFor } from '@/lib/data/profile';
+import { instantForLocal } from '@/lib/nutrition/day';
 
 // 15 scenarios × up to ~40 s each, three at a time.
 export const maxDuration = 300;
@@ -33,6 +34,7 @@ const ERR_PREVIEW = 300;
 const RED_PNG = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mO4IydHU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAJI2YD30P/0LAAAAAElFTkSuQmCC';
 
 const SCENARIO_CONCURRENCY = 3;
+const FAILED_REPLY_PREVIEW = 1500;
 
 const Body = z.object({
   models: z.array(z.string().regex(/^[a-z0-9.\-]+$/)).max(6).optional(),
@@ -86,10 +88,13 @@ function scenarioImages(s: Scenario): AgentImage[] {
 async function runScenarios(sb: SupabaseClient, userId: string, only?: string[], model?: string) {
   const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null; trace?: { tool: string; out: string }[] }[] = [];
   const selected = only?.length ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
+  const profile = await getProfile(sb, userId);
   for (let i = 0; i < selected.length; i += SCENARIO_CONCURRENCY) {
     const batch = selected.slice(i, i + SCENARIO_CONCURRENCY);
-    const worlds = batch.map((s) => scenarioWorld(s));
+    const clocks = batch.map((s) => (s.at ? instantForLocal(todayFor(profile), s.at, profile.timezone) : new Date()));
+    const worlds = batch.map((s, j) => scenarioWorld(s, clocks[j].getTime()));
     const runs = await Promise.all(batch.map((s, j) => runAgent({
+      now: s.at ? clocks[j] : undefined,
       sb, userId, trigger: s.proactive ? 'cron' : 'eval', userText: s.proactive ? undefined : s.prompt, images: scenarioImages(s), dryRun: true, dryWorld: worlds[j],
       persist: false, history: scenarioHistory(s), modelOverride: model ?? null,
       proactive: s.proactive ? { reason: s.proactive.reason, ruleKey: s.proactive.ruleKey ?? null, sentToday: 0, lastSentAt: null } : undefined,
@@ -102,8 +107,8 @@ async function runScenarios(sb: SupabaseClient, userId: string, only?: string[],
         suggestions: (r.ui.suggestions ?? []).map((o) => ({ kcal: o.kcal, protein_g: o.protein_g })), nudges: worlds[j].nudges.length, sent: r.ui.sentMessages,
       });
       out.push({
-        id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2), model: r.model,
-        ...(fails.length ? { trace: r.toolCalls.map((t) => ({ tool: t.tool, out: (t.error ?? t.output_preview).slice(0, 400) })) } : {}),
+        id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, fails.length ? FAILED_REPLY_PREVIEW : OUT_PREVIEW * 2), model: r.model,
+        ...(fails.length ? { trace: r.toolCalls.map((t) => ({ tool: t.tool, in: JSON.stringify(t.input ?? null).slice(0, 300), out: (t.error ?? t.output_preview).slice(0, 400) })) } : {}),
       });
     });
   }

@@ -9,7 +9,7 @@ import type { ToolCtx } from './tool-ctx';
 
 export type FatWarning = { findings: string[]; swap: string | null; note_for_reply: string };
 
-const NOTE = 'Скажи об этом одним коротким предложением и предложи эту замену в граммах. Без нотаций и без второго предупреждения.';
+const NOTE = 'Скажи об этом одним коротким предложением и добавь замену из swap дословно (начиная с «вместо …»). Без нотаций и без второго предупреждения.';
 
 /** The code's verdict on fat after a meal (D27): null, or what to say and the swap to offer. */
 export async function fatWarningFor(ctx: ToolCtx, meal: { id: string; day: string; fat_g: number; items: SwapItem[] }): Promise<FatWarning | null> {

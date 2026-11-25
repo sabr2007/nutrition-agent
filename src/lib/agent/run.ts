@@ -2,9 +2,10 @@ import 'server-only';
 import { isStepCount, streamText, type ModelMessage, type StepResult, type ToolSet } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { callModel, userMessageFor } from '@/lib/llm/router';
+import { callModel, LlmError, userMessageFor, type ErrorClass } from '@/lib/llm/router';
 import { agentSpec, planOptions } from '@/lib/llm/models';
 import { costUsd } from '@/lib/llm/pricing';
+import { weeklyUsageLine } from '@/lib/llm/usage';
 import { getProfile, type Profile } from '@/lib/data/profile';
 import { getDaySummary } from '@/lib/data/day';
 import { localParts } from '@/lib/nutrition/day';
@@ -28,6 +29,8 @@ export type AgentResult = {
   latencyMs: number;
   messageId: string | null;
   userMessageId: string | null;
+  /** Why the model failed (decision 'error'): the bot falls back to the free paths on quota/auth. */
+  errorClass?: ErrorClass;
 };
 
 export type TraceCall = { step: number; tool: string; input: unknown; output_preview: string; error?: string };
@@ -257,8 +260,16 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
     if (mode === 'proactive') {
       decision = ui.sentMessages.length ? 'sent' : 'silent';
       text = ui.sentMessages[0] ?? raw;
-    } else if (!text) {
-      text = writesSummary(ui) ?? 'Готово.';
+    } else {
+      // The buttons carry only the options: a question asked through ask_user must be in the text.
+      const question = ui.choices?.question.trim();
+      if (question && !text.includes(question)) text = [text || writesSummary(ui), question].filter(Boolean).join('\n\n');
+      if (!text) text = writesSummary(ui) ?? 'Готово.';
+    }
+    // The weekly review ends with the plan's usage, counted by the code from llm_calls.
+    if ((opts.skillKey ?? matchSkill(userText)) === 'weekly_review' && persist && (mode === 'chat' || decision === 'sent')) {
+      const line = await weeklyUsageLine(sb, userId).catch(() => null);
+      if (line) text = `${text}\n\n${line}`;
     }
     let ids = { messageId: null as string | null, userMessageId: null as string | null };
     if (persist) {
@@ -282,7 +293,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
       await sb.from('agent_runs').update({ status: 'error', error: message, finished_at: new Date().toISOString(), latency_ms: Date.now() - t0, tool_calls: trace }).eq('id', runId);
     }
     if (partial) return { runId, text: partial, ui, decision: 'answered', model: spec.model, toolCalls: trace, latencyMs: Date.now() - t0, ...ids };
-    return { runId, ui, decision: 'error', model: null, toolCalls: trace, latencyMs: Date.now() - t0, messageId: null, userMessageId: null, text: userMessageFor(err) };
+    return { runId, ui, decision: 'error', model: null, toolCalls: trace, latencyMs: Date.now() - t0, messageId: null, userMessageId: null, text: userMessageFor(err), errorClass: err instanceof LlmError ? err.cls : 'unknown' };
   }
 }
 

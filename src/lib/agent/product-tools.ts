@@ -109,10 +109,12 @@ export function productTools(ctx: ToolCtx): ToolSet {
           console.warn('[lookup_product] web error', (e as Error).message?.slice(0, 160));
         }
         if (web) {
-          const candidate = asFood('web', web.name, web.brand, web.basis === '100ml', web.per100);
+          // The page was found for this brand: when it does not repeat the brand, the brand is the one searched for.
+          const brand = web.brand?.trim() || a.brand?.trim() || null;
+          const candidate = asFood('web', web.name, brand, web.basis === '100ml', web.per100);
           const webGate = query ? relevanceGate(query, [candidate], { brand: a.brand }) : { ok: true };
           if (webGate.ok) {
-            const food = await save({ source: 'web', source_ref: web.url, name: web.name, brand: web.brand, isDrink: web.basis === '100ml', per100: web.per100 });
+            const food = await save({ source: 'web', source_ref: web.url, name: web.name, brand, isDrink: web.basis === '100ml', per100: web.per100 });
             return reply('web', food, web.url);
           }
         }

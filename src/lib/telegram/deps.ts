@@ -6,6 +6,7 @@ import { serverEnv } from '@/lib/env';
 import { supabaseAdmin, supabaseAsUser } from '@/lib/supabase/server';
 import { httpBot, type BotApi } from './bot';
 import { savePhoto, transcribeVoice } from './media';
+import { offlineOffer } from './offline-offer';
 import { handleStranger } from './pairing';
 import { deliverPhaseReports } from './phase-reports';
 import { supabaseTgStore, type Owner, type TgStore } from './store';
@@ -40,7 +41,7 @@ export function telegramRuntime(): TelegramRuntime {
   const turn: TurnDeps = {
     bot, store, appUrl: env.appUrl,
     userClient: async (userId) => supabaseAsUser(await ownerAccessToken(userId)),
-    runAgent, savePhoto, transcribeVoice,
+    runAgent, savePhoto, transcribeVoice, offlineOffer,
   };
   const worker: WorkerDeps = { store, bot, turn: (batch, owner) => runTurn(batch, owner, turn) };
   const webhook: WebhookDeps = {

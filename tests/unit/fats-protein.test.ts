@@ -78,3 +78,17 @@ describe('Open Food Facts products', () => {
     expect(parseOffProduct({ code: '1', product_name: 'X' })).toBeNull();
   });
 });
+
+describe('weekly plan usage line', () => {
+  test('sums calls, tokens and quota hits', async () => {
+    const { sumUsage, usageLine } = await import('@/lib/llm/usage');
+    const u = sumUsage([
+      { status: 'ok', error_code: null, tokens_in: 900_000, tokens_out: 40_000 },
+      { status: 'ok', error_code: null, tokens_in: 350_000, tokens_out: 12_000 },
+      { status: 'error', error_code: 'quota:429', tokens_in: null, tokens_out: null },
+      { status: 'error', error_code: 'timeout:timeout', tokens_in: null, tokens_out: null },
+    ]);
+    expect(u).toEqual({ calls: 4, failed: 2, quotaHits: 1, tokensIn: 1_250_000, tokensOut: 52_000 });
+    expect(usageLine(u)).toBe('Расход плана ChatGPT за 7 дней: 4 вызова, 1,3 млн токенов (вход 1,3 млн, выход 52 тыс.); в лимит упёрлись 1 раз.');
+  });
+});
