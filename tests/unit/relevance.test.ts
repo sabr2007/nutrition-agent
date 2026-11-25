@@ -183,3 +183,18 @@ describe('relevanceGate (D24 regression)', () => {
     expect(relevanceGate('что-то', [])).toMatchObject({ ok: false, reason: 'no_results' });
   });
 });
+
+describe('branded products found by their brand (web pages, OFF)', () => {
+  const ext = (name: string, brand: string) => ({ id: 'x', name_ru: name, name_en: null, brand, user_id: 'external', source: 'external', aliases: [], category: null, state: 'as_is', kcal_100g: 430, protein_100g: 3, fat_100g: 14, carbs_100g: 74, confidence: 'medium', score: 2 }) as unknown as Food;
+  const q = 'Рот Фронт Конфеты глазированные «Ромашка»';
+  test('the page may leave out the category and descriptors', () => {
+    expect(relevanceGate(q, [ext('Ромашка', 'Рот Фронт')], { brand: 'Рот Фронт' }).ok).toBe(true);
+    expect(relevanceGate(q, [ext('Конфеты Ромашка', 'Рот Фронт')], { brand: 'Рот Фронт' }).ok).toBe(true);
+  });
+  test('but not the name, not another product, not another flavor', () => {
+    expect(relevanceGate(q, [ext('Конфеты Ласточка', 'Рот Фронт')], { brand: 'Рот Фронт' }).ok).toBe(false);
+    expect(relevanceGate(q, [ext('Вафли Ромашка', 'Рот Фронт')], { brand: 'Рот Фронт' }).ok).toBe(false);
+    expect(relevanceGate('Fuse Tea холодный чай лимонный', [ext('Fuse Tea', 'Fuse Tea')], { brand: 'Fuse Tea' }).ok).toBe(false);
+    expect(relevanceGate('Fuse Tea лимон', [ext('Fuse Tea персик', 'Fuse Tea')], { brand: 'Fuse Tea' }).ok).toBe(false);
+  });
+});

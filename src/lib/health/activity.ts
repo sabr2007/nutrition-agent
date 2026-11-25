@@ -11,7 +11,7 @@ export type DayActivity = {
   total_kcal: number | null;
   resting_hr: number | null;
   sleep: { minutes: number | null; start: string | null; end: string | null; stages: Record<string, number> } | null;
-  workouts: { kind: string; start: string | null; end: string | null; duration_min: number | null; kcal: number | null }[];
+  workouts: { kind: string; start: string | null; end: string | null; duration_min: number | null; kcal: number | null; source: string }[];
   source: string | null;
   synced_at: string | null;
 };
@@ -34,7 +34,7 @@ export async function getActivity(sb: SupabaseClient, userId: string, from: stri
       day: d,
       steps: num(best?.steps), active_kcal: num(best?.active_kcal), total_kcal: num(best?.total_kcal), resting_hr: num(best?.resting_hr),
       sleep: night ? { minutes: num(night.minutes), start: (night.start_at as string) ?? null, end: (night.end_at as string) ?? null, stages: (night.stages as Record<string, number>) ?? {} } : null,
-      workouts: (workouts.data ?? []).filter((w) => w.local_day === d).map((w) => ({ kind: w.kind as string, start: (w.started_at as string) ?? null, end: (w.ended_at as string) ?? null, duration_min: num(w.duration_min), kcal: num(w.kcal) })),
+      workouts: (workouts.data ?? []).filter((w) => w.local_day === d).map((w) => ({ kind: w.kind as string, start: (w.started_at as string) ?? null, end: (w.ended_at as string) ?? null, duration_min: num(w.duration_min), kcal: num(w.kcal), source: w.source as string })),
       source: (best?.source as string) ?? (night?.source as string) ?? null,
       synced_at: (best?.synced_at as string) ?? null,
     });

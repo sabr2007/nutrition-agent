@@ -61,7 +61,7 @@ describe('activity in the agent snapshot', () => {
   const day: DayActivity = {
     day: '2026-11-26', steps: 4210, active_kcal: 180, total_kcal: null, resting_hr: 61,
     sleep: { minutes: 300, start: '2026-11-25T20:30:00Z', end: '2026-11-26T01:30:00Z', stages: { deep: 52 } },
-    workouts: [{ kind: 'strength_training', start: '2026-11-26T13:00:00Z', end: '2026-11-26T14:00:00Z', duration_min: 60, kcal: 320 }],
+    workouts: [{ kind: 'strength_training', start: '2026-11-26T13:00:00Z', end: '2026-11-26T14:00:00Z', duration_min: 60, kcal: 320, source: 'google_health' }],
     source: 'google_health', synced_at: null,
   };
   test('steps, short sleep with a no-deficit hint, workout with a protein hint', () => {

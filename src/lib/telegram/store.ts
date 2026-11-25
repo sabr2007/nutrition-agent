@@ -16,6 +16,9 @@ export type ChatState = { deepNext: boolean; mutedUntil: string | null; lastRefu
 
 export type CallbackRow = { id: string; user_id: string; chat_id: number; message_id: number | null; kind: string; payload: Record<string, unknown> };
 
+/** What a button under a reminder records (notifications.reaction). */
+export type NotificationReaction = 'done' | 'snoozed' | 'not_today' | 'will_log' | 'not_eaten';
+
 export type NewUpdate = {
   update_id: number; chat_id: number | null; user_id: string | null; kind: string; media_group_id?: string | null;
   payload: TgUpdate | Record<string, never>; status: 'received' | 'ignored';
@@ -42,6 +45,11 @@ export type TgStore = {
   takeCallback(id: string, userId: string): Promise<CallbackRow | null>;
   /** Requeues stuck or failed updates and returns the chats that have waiting updates. */
   requeue(maxAttempts: number): Promise<{ chatId: number; userId: string }[]>;
+  /**
+   * A reaction to the owner's reminder; a snooze also schedules a copy `snoozeMinutes` later.
+   * Returns ok: false for an unknown or foreign notification.
+   */
+  reactToNotification(userId: string, notificationId: string, reaction: NotificationReaction, opts?: { snoozeMinutes?: number; now?: Date }): Promise<{ ok: boolean; at?: string }>;
 };
 
 const camel = (r: Record<string, unknown> | null): ChatState => ({
@@ -128,6 +136,27 @@ export function supabaseTgStore(admin: SupabaseClient): TgStore {
         .eq('id', id).eq('user_id', userId).is('used_at', null).gt('expires_at', new Date().toISOString())
         .select('id, user_id, chat_id, message_id, kind, payload').maybeSingle();
       return (data as CallbackRow | null) ?? null;
+    },
+    async reactToNotification(userId, notificationId, reaction, opts = {}) {
+      const now = opts.now ?? new Date();
+      const { data: n } = await admin.from('notifications').select('id, rule_key, local_day, title, body, deep_link, payload')
+        .eq('id', notificationId).eq('user_id', userId).maybeSingle();
+      if (!n) return { ok: false };
+      const patch: Record<string, unknown> = { reaction, acted_at: now.toISOString() };
+      if (reaction === 'not_today') patch.dismissed_at = now.toISOString();
+      let at: string | undefined;
+      if (reaction === 'snoozed') {
+        at = new Date(now.getTime() + (opts.snoozeMinutes ?? 15) * 60_000).toISOString();
+        patch.snoozed_until = at;
+        const { error } = await admin.from('notifications').insert({
+          user_id: userId, rule_key: n.rule_key, local_day: n.local_day, title: n.title, body: n.body, deep_link: n.deep_link,
+          status: 'pending', scheduled_for: at, payload: n.payload ?? {},
+        });
+        if (error) throw new Error(`snooze: ${error.code}`);
+      }
+      const { error } = await admin.from('notifications').update(patch).eq('id', notificationId).eq('user_id', userId);
+      if (error) throw new Error(`reaction: ${error.code}`);
+      return { ok: true, at };
     },
     async requeue(maxAttempts) {
       const { data, error } = await admin.rpc('tg_requeue', { p_max_attempts: maxAttempts });

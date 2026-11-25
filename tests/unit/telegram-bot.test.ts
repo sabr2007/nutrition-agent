@@ -86,6 +86,11 @@ class MemoryStore implements TgStore {
     this.pairings.add(h);
     this.profile = { userId, telegramUserId: tg, chatId };
   }
+  reactions: { id: string; reaction: string; minutes?: number }[] = [];
+  async reactToNotification(_userId: string, id: string, reaction: string, opts: { snoozeMinutes?: number } = {}) {
+    this.reactions.push({ id, reaction, minutes: opts.snoozeMinutes });
+    return { ok: id !== 'foreign', at: reaction === 'snoozed' ? new Date(Date.UTC(2026, 10, 26, 10, 15)).toISOString() : undefined };
+  }
   async saveCallbacks(rows: CallbackRow[]) { for (const r of rows) this.callbacks.set(r.id, { ...r, used: false }); }
   async takeCallback(id: string, userId: string) {
     const c = this.callbacks.get(id);
@@ -260,6 +265,21 @@ describe('turns', () => {
     await handleWebhook(post(press(n++)), h.webhook);
     await h.drain();
     expect(h.agentCalls).toHaveLength(2);
+  });
+  test('reminder buttons: ⏰ snoozes through the store and marks the message; a foreign one does nothing', async () => {
+    const h = harness();
+    h.pairOwner();
+    const { buildNotification } = await import('@/lib/telegram/notify');
+    const built = buildNotification({ id: 'n-1', body: 'Креатин 5 г', buttons: 'reminder' }, { userId: USER, chatId: OWNER_TG });
+    await h.store.saveCallbacks(built.callbacks);
+    const markup = built.keyboard!;
+    const snooze = markup.inline_keyboard[0][1];
+    await handleWebhook(post({ update_id: n++, callback_query: { id: 'cbx', from: { id: OWNER_TG }, data: snooze.callback_data, message: { message_id: 777, date: 0, chat: { id: OWNER_TG, type: 'private' }, reply_markup: markup } } } as TgUpdate), h.webhook);
+    await h.drain();
+    expect(h.store.reactions).toEqual([{ id: 'n-1', reaction: 'snoozed', minutes: 15 }]);
+    const edited = h.sent.find((s) => s.method === 'editMessageReplyMarkup')!;
+    expect(edited.markup?.inline_keyboard[0][0].text).toMatch(/^⏰ Напомню в \d\d:\d\d$/);
+    expect(h.agentCalls).toHaveLength(0);
   });
   test('an album of three photos is one agent turn with three images', async () => {
     const h = harness();

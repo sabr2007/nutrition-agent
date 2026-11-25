@@ -3,6 +3,7 @@ import { confirmAction } from '@/lib/agent/confirm';
 import { logTemplate, saveMeal } from '@/lib/data/meals';
 import type { BotApi } from './bot';
 import { escapeHtml } from './format';
+import { reactionLabel, type NotifyAction } from './notify';
 import { NOOP, sendHtml } from './reply';
 import type { Owner, StoredUpdate, TgStore } from './store';
 import type { InlineButton, InlineKeyboard } from './types';
@@ -94,6 +95,17 @@ export async function handleCallback(u: StoredUpdate, c: Classified, ctx: Callba
       const saved = await logTemplate(sb, ctx.owner.userId, { templateId: String(p.template_id), clientId: `tg:${id}` });
       await edit(ctx, messageId, markKeyboard(markup, pressed, `✓ ${saved.name} записан`));
       await sendHtml(ctx.bot, ctx.chatId, `🍽 ${escapeHtml(saved.name)} — ${Math.round(saved.kcal)} ккал · Б ${Math.round(saved.protein_g)} · Ж ${Math.round(saved.fat_g)} · У ${Math.round(saved.carbs_g)}`);
+      return {};
+    }
+    case 'notify': {
+      // A reaction to a reminder: ✓ / ⏰ / 🔕, or the «долго без еды» answers.
+      const action = String(p.action) as NotifyAction;
+      const reaction = action === 'snooze' ? 'snoozed' : action;
+      const r = await ctx.store.reactToNotification(ctx.owner.userId, String(p.notification_id), reaction, { snoozeMinutes: Number(p.minutes) || undefined });
+      if (!r.ok) return {};
+      // «Записать» options under an agent message stay; the reaction buttons become the mark.
+      await edit(ctx, messageId, markKeyboard(markup, (b) => !b.text.startsWith('Записать:'), reactionLabel(action, r.at)));
+      if (action === 'will_log') await ctx.bot.sendMessage(ctx.chatId, 'Пиши, что ел, или пришли фото — запишу.');
       return {};
     }
     default:

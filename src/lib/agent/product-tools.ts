@@ -108,6 +108,7 @@ export function productTools(ctx: ToolCtx): ToolSet {
           webMiss = 'error';
           console.warn('[lookup_product] web error', (e as Error).message?.slice(0, 160));
         }
+        let rejected: { name: string; brand: string | null; why: string | null } | null = null;
         if (web) {
           // The page was found for this brand: when it does not repeat the brand, the brand is the one searched for.
           const brand = web.brand?.trim() || a.brand?.trim() || null;
@@ -117,9 +118,10 @@ export function productTools(ctx: ToolCtx): ToolSet {
             const food = await save({ source: 'web', source_ref: web.url, name: web.name, brand, isDrink: web.basis === '100ml', per100: web.per100 });
             return reply('web', food, web.url);
           }
+          rejected = { name: web.name, brand, why: 'detail' in webGate ? webGate.detail : null };
         }
         if (web && !webMiss) webMiss = 'not_relevant';
-        return { found: false, checked: { personal: true, open_food_facts: off.length, web: webMiss }, hint: 'Надёжных цифр не нашёл. Спроси кнопками (ask_user): «Скажу калорийность», «Сфоткаю этикетку»; похожий общий продукт — только если он выберет его сам (allow_generic).' };
+        return { found: false, checked: { personal: true, open_food_facts: off.length, web: webMiss, ...(rejected ? { web_rejected: rejected } : {}) }, hint: 'Надёжных цифр не нашёл. Спроси кнопками (ask_user): «Скажу калорийность», «Сфоткаю этикетку»; похожий общий продукт — только если он выберет его сам (allow_generic).' };
       },
     }),
   };

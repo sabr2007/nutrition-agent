@@ -158,14 +158,38 @@ export function coversBrand(f: Food, brand: string): boolean {
 const ADDS_FOOD = new Set(['с', 'под', 'на']);
 const NEUTRAL_MODIFIER = /^(завтрак|обед|ужин|перекус|полдник|ноч|работ|пар[уа]|грил|мангал|угл|сковород|огн|костр|вынос|ход[уы]|тарелк|пикник)/;
 
+/** Product-type nouns: a branded product's page may leave them out («Ромашка» for «конфеты Ромашка»). */
+const CATEGORY_NOUN = /^(конфет|шоколад|батончик|вафл|печень|пряник|зефир|мармелад|пастил|торт|пирожн|напит|чай|кофе|сок|вод|газировк|лимонад|морс|кефир|йогурт|сырок|сырк|мороже|снек|чипс|сухар|крекер|хлоп|мюсли|каш|соус|паст)/;
+
+const FLAVOR = /^(лимон|персик|клубни|малин|вишн|мят|ванил|яблоч|апельсин|манго|банан|карамел|кокос|черни|смородин|груш|ананас|арбуз|дын|лайм|грейпфрут|киви|клюкв|брусни|облепих|имбир|земляни)/;
+
+/**
+ * A branded product found by its brand may omit the category («конфеты») and descriptors
+ * («глазированные») — as long as the product's own name is there and the food adds no words of
+ * its own («Вафли Ромашка» is another product than «конфеты Ромашка»).
+ */
+function brandedProblem(p: ParsedQuery, f: Food, lost: string[], brandWords: string[]): string | null {
+  // A flavor is part of the product's identity («лимонный» Fuse Tea is not the peach one).
+  const named = lost.filter((w) => FLAVOR.test(w) || (!isAdj(w) && !CATEGORY_NOUN.test(w)));
+  if (named.length) return `нет «${named.join(', ')}» в «${f.name_ru}»`;
+  const queryWords = [...p.nouns, ...p.adjectives, ...p.core, ...p.modifiers.map((m) => m.word)];
+  const extra = contentOf(f.name_ru).filter((w) => !covered(w, queryWords) && !brandWords.some((b) => sameStem(w, b)));
+  return extra.length ? `«${f.name_ru}» — ещё «${extra.join(' ')}»` : null;
+}
+
 /** Why a food does not fit the parsed query, or null when it fits. */
-export function relevanceProblem(p: ParsedQuery, f: Food, opts: { brandMatched?: boolean } = {}): string | null {
+export function relevanceProblem(p: ParsedQuery, f: Food, opts: { brandMatched?: boolean; brandWords?: string[] } = {}): string | null {
   const all = contentOf(foodText(f));
   const nouns = all.filter((w) => !isAdj(w));
   const missing = p.nouns.filter((w) => !covered(w, isAdj(w) ? all : nouns));
-  if (missing.length) return `нет «${missing.join(', ')}» в «${f.name_ru}»`;
   const lostTrait = p.adjectives.filter((w) => !covered(w, all));
-  if (lostTrait.length) return `«${f.name_ru}» — не «${lostTrait.join(' ')}»`;
+  if (opts.brandMatched && (missing.length || lostTrait.length)) {
+    const why = brandedProblem(p, f, [...missing, ...lostTrait], opts.brandWords ?? []);
+    if (why) return why;
+  } else {
+    if (missing.length) return `нет «${missing.join(', ')}» в «${f.name_ru}»`;
+    if (lostTrait.length) return `«${f.name_ru}» — не «${lostTrait.join(' ')}»`;
+  }
   if (!opts.brandMatched) {
     // The food's own main word must be in the query, or one of its aliases must be fully named.
     const queryWords = [...p.core, ...p.modifiers.map((m) => m.word)];
@@ -224,7 +248,7 @@ export function relevanceGate(query: string, results: Food[], opts: { brand?: st
   const problems: string[] = [];
   const fit = byCategory.filter((f) => {
     if ((f.score ?? 1) < MIN_MATCH_SCORE) { problems.push(`слабое совпадение «${f.name_ru}»`); return false; }
-    const why = relevanceProblem(target, f, { brandMatched });
+    const why = relevanceProblem(target, f, { brandMatched, brandWords });
     if (why) problems.push(why);
     return !why;
   });
