@@ -29,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {!hideNav && (
         <nav aria-label="Основная навигация" className="fixed inset-x-0 bottom-0 z-30">
           <div className="mx-auto max-w-md px-5 pb-[calc(8px+var(--safe-bottom))]">
-            <div className="grid h-[var(--nav-h)] grid-cols-3 items-center rounded-[22px] border border-rule bg-card/90 px-1.5 shadow-[var(--shadow-float)] backdrop-blur-md">
+            <div className="nav-surface grid h-[var(--nav-h)] grid-cols-3 items-center rounded-[22px] border border-rule bg-card/90 px-1.5 shadow-[var(--shadow-float)] backdrop-blur-md">
               {NAV.map((n) => <NavItem key={n.href} {...n} active={isActive(path, n.href)} />)}
             </div>
           </div>

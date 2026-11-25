@@ -216,6 +216,15 @@ body::before {
   to { transform: translate3d(2%, -3%, 0) scale(1.06); }
 }
 
+/* Inside Telegram's iOS webview (D31): no full-page blend layer, no endless blurred animation, no
+   backdrop blur under the tab bar — each costs a repaint per scroll frame there. Same look, flat. */
+:root.tg body::before { mix-blend-mode: normal; opacity: 0.22; }
+:root.tg .aura { animation: none; filter: blur(28px); }
+:root.tg .nav-surface { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--card); }
+@media (prefers-reduced-motion: reduce) {
+  .aura { animation: none; }
+}
+
 /* Press feedback for every tappable element */
 .press {
   transition: transform var(--duration-fast) var(--ease-out-expo), background-color var(--duration-fast), opacity var(--duration-fast);

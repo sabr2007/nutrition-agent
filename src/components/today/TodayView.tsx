@@ -2,8 +2,9 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import useSWR from 'swr';
+import useSWR, { preload } from 'swr';
 import { api, fetcher } from '@/lib/client/api';
+import { readDay, writeDay } from '@/lib/client/day-cache';
 import type { TodayResponse } from '@/lib/client/types';
 import { dayTitle, fmt } from '@/lib/client/format';
 import { addDays } from '@/lib/nutrition/day';
@@ -20,7 +21,11 @@ export function TodayView() {
   const day = params.get('day');
   const notifId = params.get('n');
   const key = `/api/today${day ? `?day=${day}` : ''}`;
-  const { data, error, mutate, isLoading } = useSWR<TodayResponse>(key, fetcher, { revalidateOnFocus: true, refreshInterval: 60_000 });
+  // Cached copy first, fresh data in the background; refresh on focus (back from the bot), no polling.
+  const { data, error, mutate, isLoading } = useSWR<TodayResponse>(key, fetcher, {
+    fallbackData: readDay<TodayResponse>(key), revalidateOnMount: true, revalidateOnFocus: true, keepPreviousData: true,
+    onSuccess: (d) => writeDay(key, d),
+  });
 
   // Opened from a push notification → record the reaction.
   useEffect(() => {
@@ -29,6 +34,19 @@ export function TodayView() {
   }, [notifId]);
 
   const s = data?.summary;
+
+  // The neighbouring days are one tap away: fetch them ahead.
+  useEffect(() => {
+    if (!s) return;
+    for (const d of [addDays(s.day, -1), ...(s.isToday ? [] : [addDays(s.day, 1)])]) void preload(`/api/today?day=${d}`, fetcher).catch(() => undefined);
+  }, [s?.day, s?.isToday]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Delete without waiting: the meal and its numbers leave the screen at once, back on failure. */
+  async function removeMeal(id: string) {
+    await mutate(api(`/api/meals/${id}`, { method: 'DELETE' }).then(() => undefined), {
+      optimisticData: (cur) => (cur ? withoutMeal(cur, id) : cur!), rollbackOnError: true, populateCache: false, revalidate: true,
+    });
+  }
 
   if (error && !data) {
     return <div className="p-6"><p className="label">ошибка</p><p className="mt-2 text-ink-2">{(error as Error).message}</p><button className="press mt-4 rounded-full border border-ink px-4 py-2" onClick={() => mutate()}>Повторить</button></div>;
@@ -92,7 +110,7 @@ export function TodayView() {
         )}
       </section>
 
-      <MealList meals={s.meals} timezone={s.profile.timezone} onChange={() => mutate()} />
+      <MealList meals={s.meals} timezone={s.profile.timezone} onChange={() => mutate()} onDelete={removeMeal} />
     </main>
   );
 }
@@ -110,4 +128,18 @@ function MacroRow({ name, unit, value, min, max, color, big }: { name: string; u
       <AsciiBar value={value} min={min} max={max} color={color} label={name} width={big ? 26 : 11} />
     </div>
   );
+}
+
+function withoutMeal(d: TodayResponse, id: string): TodayResponse {
+  const m = d.summary.meals.find((x) => x.id === id);
+  if (!m) return d;
+  const t = d.summary.totals;
+  return {
+    ...d,
+    summary: {
+      ...d.summary,
+      meals: d.summary.meals.filter((x) => x.id !== id),
+      totals: { ...t, kcal: t.kcal - m.kcal, protein_g: t.protein_g - m.protein_g, fat_g: t.fat_g - m.fat_g, carbs_g: t.carbs_g - m.carbs_g, meals_count: t.meals_count - 1 },
+    },
+  };
 }

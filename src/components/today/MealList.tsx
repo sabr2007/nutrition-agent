@@ -16,7 +16,7 @@ import { useToast } from '@/components/ui/Toast';
 
 type Draft = Record<string, string>;
 
-export function MealList({ meals, timezone, onChange }: { meals: DayMeal[]; timezone: string; onChange: () => void }) {
+export function MealList({ meals, timezone, onChange, onDelete }: { meals: DayMeal[]; timezone: string; onChange: () => void; onDelete?: (id: string) => Promise<void> }) {
   const params = useSearchParams();
   const linked = params.get('meal');
   const [open, setOpen] = useState<string | null>(linked);
@@ -30,12 +30,12 @@ export function MealList({ meals, timezone, onChange }: { meals: DayMeal[]; time
 
   async function remove(m: DayMeal) {
     setBusy(true);
+    setOpen(null);
     try {
-      await api(`/api/meals/${m.id}`, { method: 'DELETE' });
+      if (onDelete) await onDelete(m.id);
+      else { await api(`/api/meals/${m.id}`, { method: 'DELETE' }); onChange(); }
       haptic('warning');
       toast({ text: 'Удалено (история сохранена)' });
-      setOpen(null);
-      onChange();
     } catch (e) {
       haptic('error');
       toast({ text: (e as Error).message, tone: 'error' });

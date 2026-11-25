@@ -21,9 +21,17 @@ export type Profile = {
 };
 
 export async function getProfile(sb: SupabaseClient, userId: string): Promise<Profile> {
+  return (await findProfile(sb, userId)) ?? profileFrom(userId, {});
+}
+
+/** The profile row, or null when the account has none (a broken sign-up). */
+export async function findProfile(sb: SupabaseClient, userId: string): Promise<Profile | null> {
   const { data, error } = await sb.from('profiles').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw new Error(`profile: ${error.message}`);
-  const p = (data ?? {}) as Partial<Profile>;
+  return data ? profileFrom(userId, data as Partial<Profile>) : null;
+}
+
+function profileFrom(userId: string, p: Partial<Profile>): Profile {
   return {
     user_id: userId,
     display_name: p.display_name ?? null,
@@ -31,8 +39,8 @@ export async function getProfile(sb: SupabaseClient, userId: string): Promise<Pr
     day_boundary_minutes: p.day_boundary_minutes ?? DEFAULT_BOUNDARY_MIN,
     quiet_start: (p.quiet_start ?? '23:00').slice(0, 5),
     quiet_end: (p.quiet_end ?? '08:00').slice(0, 5),
-    max_proactive_per_day: p.max_proactive_per_day ?? 10,
-    min_minutes_between_proactive: p.min_minutes_between_proactive ?? 25,
+    max_proactive_per_day: p.max_proactive_per_day ?? 6,
+    min_minutes_between_proactive: p.min_minutes_between_proactive ?? 90,
     training: (p.training as Training) ?? { days: [1, 3, 5], start: '18:00', end: '19:30' },
     dislikes: p.dislikes ?? [],
     budget_notes: p.budget_notes ?? null,
