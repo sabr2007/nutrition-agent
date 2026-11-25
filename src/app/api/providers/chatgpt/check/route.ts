@@ -12,6 +12,10 @@ import { runAgent } from '@/lib/agent/run';
 import { checkScenario, scenarioHistory, scenarioWorld, SCENARIOS, type Scenario } from '@/lib/agent/scenarios';
 import { EVAL_IMAGES } from '@/lib/agent/eval-images';
 import type { AgentImage } from '@/lib/agent/run';
+import { productTools } from '@/lib/agent/product-tools';
+import { emptyUi } from '@/lib/agent/tool-ctx';
+import { newDryWorld } from '@/lib/agent/dry-world';
+import { getProfile } from '@/lib/data/profile';
 
 // 15 scenarios × up to ~40 s each, three at a time.
 export const maxDuration = 300;
@@ -38,6 +42,8 @@ const Body = z.object({
   scenarios: z.array(z.string().max(40)).max(40).optional(),
   /** Run the agent scenarios on this model (before/after a model switch). */
   agent_model: z.string().regex(/^[a-z0-9.\-]+$/).max(40).optional(),
+  /** Diagnose product lookup (dry run: nothing is saved). */
+  lookup: z.object({ name: z.string().max(120).optional(), brand: z.string().max(80).optional(), barcode: z.string().regex(/^\d{8,14}$/).optional() }).optional(),
 }).default({ probes: true, agent: false });
 
 type Probe = { ok: boolean; ms: number; out?: string; error?: string };
@@ -66,12 +72,19 @@ async function resolveUser(req: Request): Promise<{ userId: string; sb: Supabase
 }
 
 /** Agent eval scenarios on the real prompt and data, write tools simulated. */
+async function diagnoseLookup(sb: SupabaseClient, userId: string, args: { name?: string; brand?: string; barcode?: string }) {
+  const ctx = { sb, userId, profile: await getProfile(sb, userId), runId: crypto.randomUUID(), trigger: 'eval' as const, ui: emptyUi(), dryRun: true, dry: newDryWorld() };
+  const t0 = Date.now();
+  const result = await productTools(ctx).lookup_product.execute!(args as never, { toolCallId: 'diagnose', messages: [], context: undefined } as never);
+  return { ms: Date.now() - t0, result };
+}
+
 function scenarioImages(s: Scenario): AgentImage[] {
   return (s.images ?? []).filter((k) => EVAL_IMAGES[k]).map((k) => ({ mediaId: crypto.randomUUID(), path: `eval/${k}`, data: new Uint8Array(Buffer.from(EVAL_IMAGES[k], 'base64')), mime: 'image/jpeg' }));
 }
 
 async function runScenarios(sb: SupabaseClient, userId: string, only?: string[], model?: string) {
-  const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null }[] = [];
+  const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null; trace?: { tool: string; out: string }[] }[] = [];
   const selected = only?.length ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
   for (let i = 0; i < selected.length; i += SCENARIO_CONCURRENCY) {
     const batch = selected.slice(i, i + SCENARIO_CONCURRENCY);
@@ -88,7 +101,10 @@ async function runScenarios(sb: SupabaseClient, userId: string, only?: string[],
         tools, text: r.text, error: r.decision === 'error', effects: worlds[j].effects, choices: Boolean(r.ui.choices),
         suggestions: (r.ui.suggestions ?? []).map((o) => ({ kcal: o.kcal, protein_g: o.protein_g })), nudges: worlds[j].nudges.length, sent: r.ui.sentMessages,
       });
-      out.push({ id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2), model: r.model });
+      out.push({
+        id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2), model: r.model,
+        ...(fails.length ? { trace: r.toolCalls.map((t) => ({ tool: t.tool, out: (t.error ?? t.output_preview).slice(0, 400) })) } : {}),
+      });
     });
   }
   return { passed: out.filter((r) => r.pass).length, total: out.length, results: out };
@@ -161,7 +177,7 @@ export const POST = handler(async (req) => {
   rateLimit(`chatgpt-check:${userId}`, 6, 60 * 60_000);
   const parsed = Body.safeParse(await req.json().catch(() => undefined));
   if (!parsed.success) throw new HttpError(400, 'Некорректный запрос', 'validation');
-  const { probes, agent, scenarios, agent_model: agentModel } = parsed.data;
+  const { probes, agent, scenarios, agent_model: agentModel, lookup } = parsed.data;
   const models = parsed.data.models?.length ? parsed.data.models : DEFAULT_MODELS;
   const token = await getChatgptToken(userId);
   if (!token) return json({ connected: false });
@@ -179,5 +195,6 @@ export const POST = handler(async (req) => {
     catalog: probes ? await catalog(token) : null,
     results,
     agent: agent ? await runScenarios(sb, userId, scenarios, agentModel) : null,
+    lookup: lookup ? await diagnoseLookup(sb, userId, lookup) : null,
   });
 });

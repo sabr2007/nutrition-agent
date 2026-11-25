@@ -11,6 +11,12 @@ import { isContent, relevanceGate, sameStem, tokens } from '@/lib/recognition/re
 /** Variant words a product name may carry that change what it is («Coca-Cola Zero» ≠ «Coca-Cola»). */
 const VARIANT = /^(zero|light|lite|diet|sugar|free|без|лайт|зеро|диет|cherry|vanilla|lemon|lime|peach|mango|вишн|ванил|лимон|лайм|персик|манго|клубник|малин|шоколадн|карамел)/;
 
+/** The product name carries a variant word the query does not («zero», «вишня»). */
+function unaskedVariant(query: string, f: { name_ru: string; brand?: string | null }): boolean {
+  const q = tokens(query).filter(isContent);
+  return tokens(`${f.name_ru} ${f.brand ?? ''}`).filter(isContent).some((w) => VARIANT.test(w) && !q.some((x) => sameStem(x, w)));
+}
+
 /** Products the query names best first: fewer unasked variant words, more of the name covered. */
 function rankByName<T extends { name_ru: string; brand?: string | null }>(query: string, items: T[]): T[] {
   const q = tokens(query).filter(isContent);
@@ -81,8 +87,10 @@ export function productTools(ctx: ToolCtx): ToolSet {
         const off: OffProduct[] = a.barcode ? [await offByBarcode(a.barcode)].filter((p): p is OffProduct => Boolean(p)) : await offSearch(query);
         const offFoods = off.map((p) => asFood(p.code, p.name, p.brand, p.isDrink, p.per100));
         const offGate = a.barcode && offFoods.length ? { ok: true as const, pool: offFoods } : query ? relevanceGate(query, offFoods, { brand: a.brand }) : null;
-        if (offGate?.ok) {
-          const pick = a.barcode ? offGate.pool[0] : rankByName(query, offGate.pool)[0];
+        // A variant the person did not name («Zero» for «Coca-Cola») is not a match at all.
+        const offPool = offGate?.ok ? (a.barcode ? offGate.pool : rankByName(query, offGate.pool).filter((f) => !unaskedVariant(query, f))) : [];
+        if (offPool.length) {
+          const pick = offPool[0];
           const p = off.find((x) => x.code === pick.id)!;
           const food = await save({ source: 'off', source_ref: p.url, barcode: p.code, name: p.name, brand: p.brand, isDrink: p.isDrink, per100: p.per100, servingG: p.servingG });
           return reply('open_food_facts', food, p.url);
