@@ -23,12 +23,15 @@ const FOOD_CHECK_RULE = 'no_food_5h';
 const DUE_BATCH = 5;
 const DAY_MS = 24 * 3600_000;
 
-export async function runTick(admin: SupabaseClient, now = new Date(), send: Deliver = deliver): Promise<TickReport[]> {
+/** `preview`: evaluate the rules at `now` and report what would be sent — nothing is sent, written or asked of the agent. */
+export type TickOptions = { preview?: boolean };
+
+export async function runTick(admin: SupabaseClient, now = new Date(), send: Deliver = deliver, opts: TickOptions = {}): Promise<TickReport[]> {
   const { data: users } = await admin.from('profiles').select('user_id');
   const reports: TickReport[] = [];
   for (const u of users ?? []) {
     try {
-      reports.push(await tickUser(admin, u.user_id as string, now, send));
+      reports.push(await tickUser(admin, u.user_id as string, now, send, opts));
     } catch (e) {
       reports.push({ userId: u.user_id as string, considered: 0, sent: [], skipped: {}, delivered: 0, errors: [(e as Error).message.slice(0, 200)] });
     }
@@ -57,7 +60,7 @@ async function limitState(admin: SupabaseClient, userId: string, day: string, no
   return { today, botSentAt: (recent ?? []).map((n) => Date.parse(n.sent_at as string)), lastOwnerAt: owner.length ? Math.max(...owner) : null };
 }
 
-async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: Deliver): Promise<TickReport> {
+async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: Deliver, opts: TickOptions): Promise<TickReport> {
   const report: TickReport = { userId, considered: 0, sent: [], skipped: {}, delivered: 0, errors: [] };
   const profile = await getProfile(admin, userId);
   const local = localParts(now, profile.timezone);
@@ -66,7 +69,7 @@ async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: 
   const muted = mutedUntil != null && mutedUntil > now.getTime();
 
   // 1) Due one-off notifications (snoozes, agent-scheduled reminders) — they wait out quiet hours and /mute.
-  if (!quiet && !muted) {
+  if (!quiet && !muted && !opts.preview) {
     const { data: due } = await admin.from('notifications').select('id, title, body, deep_link, rule_key, payload').eq('user_id', userId).eq('status', 'pending').lte('scheduled_for', now.toISOString()).limit(DUE_BATCH);
     for (const n of due ?? []) {
       report.delivered += await send(admin, userId, n as Outgoing);
@@ -75,7 +78,7 @@ async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: 
   }
 
   // 2) Day rollover: deterministic episodic summary of yesterday (no LLM needed).
-  await summarizeYesterday(admin, userId, profile, now).catch((e) => report.errors.push(`summary: ${(e as Error).message.slice(0, 120)}`));
+  if (!opts.preview) await summarizeYesterday(admin, userId, profile, now).catch((e) => report.errors.push(`summary: ${(e as Error).message.slice(0, 120)}`));
 
   if (muted || quiet) {
     report.skipped['*'] = muted ? 'muted' : 'quiet_hours';
@@ -112,11 +115,15 @@ async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: 
         agentSentToday: today.filter((n) => n.status === 'sent' && n.key != null && agentKeys.has(n.key)).length, botSentAt, lastOwnerAt: state.lastOwnerAt,
       });
       if (gate) { skip(gate); continue; }
+      if (opts.preview) { report.sent.push(`${rule.key}:agent`); continue; }
       const sentToday = today.filter((n) => n.status === 'sent').length;
       const r = await runAgent({ sb: admin, userId, trigger: 'cron', skillKey: rule.skill_key ?? 'proactive_checkin', proactive: { reason: rule.title, ruleKey: rule.key, template: rule.template, sentToday, lastSentAt: botSentAt.length ? localParts(new Date(Math.max(...botSentAt)), profile.timezone).hhmm : null }, now });
       if (r.decision !== 'sent') { skip(`agent_${r.decision}`); await recordSuppressed(admin, userId, summary.day, rule, `agent:${r.decision}`); continue; }
       body = r.text;
       payload.suggestions = (r.ui.suggestions ?? []).map((o) => ({ title: o.title, kcal: o.kcal, items: o.items }));
+    } else if (opts.preview) {
+      report.sent.push(`${rule.key}: ${fillTemplate(rule.template, facts).slice(0, 120)}`);
+      continue;
     } else if (rule.compose_with_llm) {
       body = await compose(userId, rule, facts).catch(() => null);
     }
