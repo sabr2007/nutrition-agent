@@ -2,7 +2,7 @@ import 'server-only';
 import { isStepCount, streamText, type ModelMessage, type StepResult, type ToolSet } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { callModel, userMessageFor } from '@/lib/llm/router';
-import { MODELS, planOptions } from '@/lib/llm/models';
+import { agentSpec, planOptions } from '@/lib/llm/models';
 import { costUsd } from '@/lib/llm/pricing';
 import { getProfile, type Profile } from '@/lib/data/profile';
 import { getDaySummary } from '@/lib/data/day';
@@ -42,6 +42,8 @@ export type AgentOptions = {
   deep?: boolean;
   /** Where the reply is shown: the app's chat or Telegram (formatting rules differ). */
   channel?: 'app' | 'telegram';
+  /** Evals only: run on this model instead of the configured one. */
+  modelOverride?: string | null;
   skillKey?: string | null;
   proactive?: { reason: string; ruleKey?: string | null; template?: string | null; sentToday: number; lastSentAt?: string | null };
   dryRun?: boolean;
@@ -195,7 +197,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
   const userText = opts.userText?.trim() ?? '';
   const runId = crypto.randomUUID();
   const chatTurn = opts.trigger === 'chat' || opts.trigger === 'eval';
-  const spec = chatTurn && opts.deep ? MODELS.deep : MODELS.agent;
+  // Plain food logging («съел 200 г гречки», no question, no photo) runs on low effort.
 
   if (persist) {
     await sb.from('agent_runs').insert({
@@ -206,6 +208,11 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
 
   const dry = opts.dryRun ? (opts.dryWorld ?? newDryWorld()) : undefined;
   const { profile, system, messages, mode } = await prepare(opts, userText, images, persist, dry);
+  // Plain food logging («съел 200 г гречки», no question, no photo) runs on low effort. The model:
+  // eval override → profiles.settings.agent_model (instant) → AGENT_MODEL env → default.
+  const simpleLog = chatTurn && !images.length && isFoodReport(userText) && !userText.includes('?');
+  const settingsModel = typeof profile.settings.agent_model === 'string' && /^[a-z0-9.\-]{3,40}$/.test(profile.settings.agent_model) ? profile.settings.agent_model : null;
+  const spec = agentSpec({ deep: chatTurn && opts.deep, simpleLog, model: opts.modelOverride ?? settingsModel });
   const ui = emptyUi();
   let trace: TraceCall[] = [];
   const toolCtx: ToolCtx = {

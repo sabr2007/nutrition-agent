@@ -19,6 +19,7 @@ export const maxDuration = 300;
 // image input) and, on request, the agent eval scenarios in dry-run (nothing is written).
 // Callable by the owner or with the cron secret; returns no tokens.
 const DEFAULT_MODELS = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'];
+const WEB_SEARCH_PROMPT = 'Найди в интернете калорийность холодного чая Fuse Tea (лимон) на 100 мл. Ответь одной строкой: число ккал и адрес страницы.';
 const PROBE_TIMEOUT_MS = 60_000;
 const OUT_PREVIEW = 120;
 const ERR_PREVIEW = 300;
@@ -33,6 +34,8 @@ const Body = z.object({
   agent: z.boolean().default(false),
   /** Run only these scenario ids. */
   scenarios: z.array(z.string().max(40)).max(40).optional(),
+  /** Run the agent scenarios on this model (before/after a model switch). */
+  agent_model: z.string().regex(/^[a-z0-9.\-]+$/).max(40).optional(),
 }).default({ probes: true, agent: false });
 
 type Probe = { ok: boolean; ms: number; out?: string; error?: string };
@@ -61,14 +64,14 @@ async function resolveUser(req: Request): Promise<{ userId: string; sb: Supabase
 }
 
 /** Agent eval scenarios on the real prompt and data, write tools simulated. */
-async function runScenarios(sb: SupabaseClient, userId: string, only?: string[]) {
+async function runScenarios(sb: SupabaseClient, userId: string, only?: string[], model?: string) {
   const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null }[] = [];
   const selected = only?.length ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
   for (let i = 0; i < selected.length; i += SCENARIO_CONCURRENCY) {
     const batch = selected.slice(i, i + SCENARIO_CONCURRENCY);
     const worlds = batch.map((s) => scenarioWorld(s));
     const runs = await Promise.all(batch.map((s, j) => runAgent({
-      sb, userId, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: worlds[j], persist: false, history: scenarioHistory(s),
+      sb, userId, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: worlds[j], persist: false, history: scenarioHistory(s), modelOverride: model ?? null,
     })));
     batch.forEach((s, j) => {
       const r = runs[j];
@@ -91,7 +94,9 @@ async function catalog(token: string): Promise<unknown> {
 }
 
 function probesFor(token: string, slug: string): Record<string, Promise<Probe>> {
-  const model = createOpenAI({ apiKey: token }).responses(slug);
+  const provider = createOpenAI({ apiKey: token });
+  const model = provider.responses(slug);
+  const openaiTools = provider.tools;
   const base = { model, maxRetries: 0, timeout: PROBE_TIMEOUT_MS };
   const plain = { openai: { store: false } };
   const image: ModelMessage[] = [{
@@ -119,6 +124,17 @@ function probesFor(token: string, slug: string): Record<string, Promise<Probe>> 
       return `calls=[${calls}] text=${(await st.text).trim()}`;
     }),
     vision: probe(async () => streamText({ ...base, messages: image, providerOptions: plain }).text),
+    // Built-in web search on the plan route (depends on the model and the account's policy).
+    web_search: probe(async () => {
+      const st = streamText({
+        ...base, prompt: WEB_SEARCH_PROMPT, tools: { web_search: openaiTools.webSearch({ searchContextSize: 'low' }) },
+        stopWhen: isStepCount(4), providerOptions: { openai: { store: false, reasoningEffort: 'low', reasoningSummary: null } },
+      });
+      const steps = await st.steps;
+      const searches = steps.flatMap((x) => x.toolCalls).filter((c) => c.toolName === 'web_search').length;
+      const sources = (await st.sources).length;
+      return `searches=${searches} sources=${sources} text=${(await st.text).trim().slice(0, 120)}`;
+    }),
     // The agent's last allowed step forbids tools so the run always ends with a reply.
     tool_choice_none: probe(async () => {
       const st = streamText({ ...base, prompt: 'Вызови ping с n=21, если можешь, иначе ответь словом «нет».', tools: { ping }, toolChoice: 'none', providerOptions: plain });
@@ -134,7 +150,7 @@ export const POST = handler(async (req) => {
   rateLimit(`chatgpt-check:${userId}`, 6, 60 * 60_000);
   const parsed = Body.safeParse(await req.json().catch(() => undefined));
   if (!parsed.success) throw new HttpError(400, 'Некорректный запрос', 'validation');
-  const { probes, agent, scenarios } = parsed.data;
+  const { probes, agent, scenarios, agent_model: agentModel } = parsed.data;
   const models = parsed.data.models?.length ? parsed.data.models : DEFAULT_MODELS;
   const token = await getChatgptToken(userId);
   if (!token) return json({ connected: false });
@@ -151,6 +167,6 @@ export const POST = handler(async (req) => {
     connected: true,
     catalog: probes ? await catalog(token) : null,
     results,
-    agent: agent ? await runScenarios(sb, userId, scenarios) : null,
+    agent: agent ? await runScenarios(sb, userId, scenarios, agentModel) : null,
   });
 });

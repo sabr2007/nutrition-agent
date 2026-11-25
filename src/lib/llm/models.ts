@@ -11,9 +11,12 @@ export type Task = 'agent' | 'deep' | 'vision' | 'parse' | 'compose';
 export type Effort = 'low' | 'medium' | 'high';
 export type ModelSpec = { model: string; effort: Effort };
 
+/** The agent's model; AGENT_MODEL switches it without a deploy (D26). */
+export const AGENT_MODEL = process.env.AGENT_MODEL?.trim() || 'gpt-6.1-sol';
+
 export const MODELS: Record<Task, ModelSpec> = {
-  /** Chat and proactive check-ins: fast, solid tool calling and Russian. */
-  agent: { model: 'gpt-6-luna', effort: 'low' },
+  /** Chat, Telegram and proactive check-ins: strong tool calling; effort is chosen per turn (agentSpec). */
+  agent: { model: AGENT_MODEL, effort: 'medium' },
   /** «Думать дольше» in the chat: plans, weekly reviews, hard questions. */
   deep: { model: 'gpt-6.1-sol', effort: 'high' },
   /** Food photos and nutrition labels on the log screen (structured output). */
@@ -23,6 +26,15 @@ export const MODELS: Record<Task, ModelSpec> = {
   /** Push texts and the background memory review. */
   compose: { model: 'gpt-6-luna', effort: 'low' },
 };
+
+/**
+ * The code, not the model, picks the effort: a plain «I ate X» costs little thought (low), a
+ * conversation gets medium, «Думать дольше» goes to MODELS.deep (high).
+ */
+export function agentSpec(o: { deep?: boolean; simpleLog?: boolean; model?: string | null }): ModelSpec {
+  if (o.deep) return o.model ? { ...MODELS.deep, model: o.model } : MODELS.deep;
+  return { model: o.model || MODELS.agent.model, effort: o.simpleLog ? 'low' : 'medium' };
+}
 
 /** The owner's OAuth access token is a bearer token for the Responses API. */
 export function chatgptModel(token: string, model: string): LanguageModel {
