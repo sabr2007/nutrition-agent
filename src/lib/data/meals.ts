@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { itemFromFood, macrosFor, r1 } from '@/lib/nutrition/calc';
+import { extrasFor, itemFromFood, macrosFor, r1 } from '@/lib/nutrition/calc';
 import type { Food, MealItemInput } from '@/lib/nutrition/types';
 import { localDay } from '@/lib/nutrition/day';
 import { getProfile, isTrainingDay } from './profile';
@@ -10,7 +10,7 @@ export const MealItemSchema = z.object({
   name: z.string().min(1).max(200),
   grams: z.number().min(0).max(5000),
   state: z.enum(['raw', 'cooked', 'dry', 'as_is']).nullable().optional(),
-  per100: z.object({ kcal: z.number().min(0).max(1000), protein: z.number().min(0).max(100), fat: z.number().min(0).max(100), carbs: z.number().min(0).max(100), partial: z.boolean().optional() }).nullable().optional(),
+  per100: z.object({ kcal: z.number().min(0).max(1000), protein: z.number().min(0).max(100), fat: z.number().min(0).max(100), carbs: z.number().min(0).max(100), partial: z.boolean().optional(), satfat: z.number().min(0).max(100).nullable().optional(), sugar: z.number().min(0).max(100).nullable().optional() }).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
   source: z.enum(['model', 'user', 'template', 'scale', 'barcode', 'agent', 'repeat']).default('user'),
   model_grams: z.number().nullable().optional(),
@@ -57,7 +57,7 @@ async function recomputeItems(sb: SupabaseClient, items: SaveMealInput['items'])
     if (!it.per100) throw new Error(`Нет данных о калорийности для «${it.name}»`);
     return {
       food_id: null, name: it.name, grams: r1(it.grams), state: it.state ?? null, per100: it.per100,
-      ...macrosFor(it.grams, it.per100), confidence: it.confidence ?? null, source: it.source,
+      ...macrosFor(it.grams, it.per100), ...extrasFor(it.grams, it.per100), confidence: it.confidence ?? null, source: it.source,
       model_grams: it.model_grams ?? null, model_label: it.model_label ?? null, edited: it.edited ?? false,
     };
   });
@@ -68,14 +68,14 @@ export async function markChecklist(sb: SupabaseClient, userId: string, day: str
   if (error) throw new Error(`checklist: ${error.message}`);
 }
 
-export type SavedMeal = { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; checklist: string[] };
+export type SavedMeal = { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; satfat_g: number | null; checklist: string[] };
 
 export async function saveMeal(sb: SupabaseClient, userId: string, input: SaveMealInput, extra: { checklistKey?: string | null } = {}): Promise<SavedMeal> {
   const items = await recomputeItems(sb, input.items);
   const payload = { ...input, items };
   const { data, error } = await sb.rpc('save_meal', { p: payload });
   if (error) throw new Error(`save_meal: ${error.message}`);
-  const meal = data as { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; slot: string | null };
+  const meal = data as { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; satfat_g: number | null; slot: string | null };
 
   // Auto-check the matching checklist items (template key, or slot for free-form meals).
   const keys = new Set<string>();
@@ -109,6 +109,7 @@ export async function saveMeal(sb: SupabaseClient, userId: string, input: SaveMe
   return {
     id: meal.id, root_id: meal.root_id, local_day: meal.local_day,
     kcal: Number(meal.kcal), protein_g: Number(meal.protein_g), fat_g: Number(meal.fat_g), carbs_g: Number(meal.carbs_g),
+    satfat_g: meal.satfat_g != null ? Number(meal.satfat_g) : null,
     checklist: [...keys],
   };
 }

@@ -1,5 +1,6 @@
 import 'server-only';
 import { isStepCount, streamText, type ModelMessage, type StepResult, type ToolSet } from 'ai';
+import { openai } from '@ai-sdk/openai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { callModel, userMessageFor } from '@/lib/llm/router';
 import { agentSpec, planOptions } from '@/lib/llm/models';
@@ -89,6 +90,12 @@ function preview(v: unknown): string {
 /** The plan route wants function tools grouped in a namespace (docs/research/chatgpt-oauth.md). */
 function namespaced(tools: ToolSet): ToolSet {
   return Object.fromEntries(Object.entries(tools).map(([k, t]) => [k, { ...t, providerOptions: { openai: { namespace: NAMESPACE } } }])) as ToolSet;
+}
+
+/** Function tools in the plan's namespace, plus the built-in web search for conversations (D26). */
+function agentTools(ctx: ToolCtx, mode: 'chat' | 'proactive'): ToolSet {
+  const tools = namespaced(buildTools(ctx));
+  return mode === 'chat' ? { ...tools, web_search: openai.tools.webSearch({ searchContextSize: 'medium' }) } : tools;
 }
 
 function userContent(text: string, images: AgentImage[]): ModelMessage['content'] {
@@ -223,7 +230,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
   try {
     const attempt = await callModel(spec, { userId, runId, purpose }, async (model) => {
       const st = streamText({
-        model, instructions: system, messages, tools: namespaced(buildTools(toolCtx)), stopWhen: isStepCount(MAX_STEPS),
+        model, instructions: system, messages, tools: agentTools(toolCtx, mode), stopWhen: isStepCount(MAX_STEPS),
         // The last allowed step must be the reply: a run that spends every step on tools ends mute.
         prepareStep: ({ stepNumber }) => (stepNumber >= MAX_STEPS - 1 ? { toolChoice: 'none' as const } : undefined),
         maxRetries: 0, timeout: opts.deep ? DEEP_TIMEOUT_MS : RUN_TIMEOUT_MS, providerOptions: planOptions(spec),

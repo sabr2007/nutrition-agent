@@ -3,7 +3,7 @@ import type { Food, FoodState, Macros, MealItemInput, Per100, ItemSource } from 
 /** Round to one decimal (how we store macros). */
 export const r1 = (n: number): number => Math.round(n * 10) / 10;
 
-export function per100Of(food: Pick<Food, 'kcal_100g' | 'protein_100g' | 'fat_100g' | 'carbs_100g'>): Per100 {
+export function per100Of(food: Pick<Food, 'kcal_100g' | 'protein_100g' | 'fat_100g' | 'carbs_100g'> & Partial<Pick<Food, 'satfat_100g' | 'sugar_100g'>>): Per100 {
   const partial = food.protein_100g == null || food.fat_100g == null || food.carbs_100g == null;
   return {
     kcal: Number(food.kcal_100g),
@@ -11,7 +11,15 @@ export function per100Of(food: Pick<Food, 'kcal_100g' | 'protein_100g' | 'fat_10
     fat: Number(food.fat_100g ?? 0),
     carbs: Number(food.carbs_100g ?? 0),
     ...(partial ? { partial: true } : {}),
+    ...(food.satfat_100g != null ? { satfat: Number(food.satfat_100g) } : {}),
+    ...(food.sugar_100g != null ? { sugar: Number(food.sugar_100g) } : {}),
   };
+}
+
+/** Saturated fat and sugar for a weight; null when the food does not know them. */
+export function extrasFor(grams: number, per100: Pick<Per100, 'satfat' | 'sugar'>): { satfat_g: number | null; sugar_g: number | null } {
+  const k = grams / 100;
+  return { satfat_g: per100.satfat != null ? r1(per100.satfat * k) : null, sugar_g: per100.sugar != null ? r1(per100.sugar * k) : null };
 }
 
 /** Deterministic macro calculation: grams x per-100 g values. The LLM never does this. */
@@ -73,6 +81,7 @@ export function itemFromFood(
     state: food.state,
     per100,
     ...macrosFor(grams, per100),
+    ...extrasFor(grams, per100),
     confidence: opts.confidence ?? null,
     source: opts.source,
     model_grams: opts.model_grams ?? null,
@@ -90,6 +99,7 @@ export function withGrams(item: MealItemInput, grams: number): MealItemInput {
     ...item,
     grams: r1(grams),
     ...macrosFor(grams, item.per100),
+    ...extrasFor(grams, item.per100),
     edited: true,
     kcal_range: item.kcal_range ? [Math.round(item.kcal_range[0] * factor), Math.round(item.kcal_range[1] * factor)] : null,
   };

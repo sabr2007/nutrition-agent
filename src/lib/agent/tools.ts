@@ -14,6 +14,7 @@ import { LabelOutput, normalizeLabel } from '@/lib/recognition/label';
 import { createPersonalFood } from '@/lib/data/foods';
 import type { PendingAction, ToolCtx } from './tool-ctx';
 import { dateSchema, hhmm, mealTools } from './meal-tools';
+import { productTools } from './product-tools';
 import { overlayDay } from './dry-world';
 import { suggestForRemaining } from './suggest';
 import { buildShoppingList } from './shopping';
@@ -76,6 +77,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
     }),
 
     ...mealTools(ctx),
+    ...productTools(ctx),
 
     update_checklist: tool({
       description: 'Mark a checklist item (keys: weigh, breakfast, creatine, protein_1, banana_pre, workout, protein_2, lunch, dinner, prep_chicken, tvorog, steps, sleep, close_day). For steps/sleep pass value.',
@@ -130,9 +132,13 @@ export function buildTools(ctx: ToolCtx): ToolSet {
     }),
 
     suggest_meal_for_remaining_macros: tool({
-      description: 'Deterministic options (with grams) to cover remaining protein within the calorie budget, from foods the user usually has. Respects dislikes.',
+      description: 'Deterministic «what to eat» options in grams with macros from the food base: within the calories left today, ranked by protein per 100 kcal; usual foods and what is at home first among equals; respects dislikes.',
       inputSchema: z.object({ protein_g: z.number().min(0).max(250).optional(), kcal_max: z.number().min(0).max(3000).optional(), before_sleep: z.boolean().optional() }),
-      execute: async (a) => suggestForRemaining(sb, userId, ctx.profile, a),
+      execute: async (a) => {
+        const r = await suggestForRemaining(sb, userId, ctx.profile, a, ctx.dry ? overlayDay(await getDaySummary(sb, userId, undefined, ctx.profile), ctx.dry) : undefined);
+        if (ctx.trigger === 'chat' || ctx.trigger === 'eval') ctx.ui.suggestions = r.options.map((o) => ({ title: o.title, items: o.items.map((i) => ({ food_id: i.food_id, name: i.name, grams: i.grams })), kcal: Math.round(o.kcal), protein_g: o.protein_g }));
+        return { ...r, note_for_reply: 'Дай 2–3 варианта из options в граммах, в этом порядке (по белку на 100 ккал). Кнопки «Записать» под ответом нарисует код.' };
+      },
     }),
 
     generate_recipe: tool({

@@ -125,3 +125,42 @@ export async function saveUserFood(
   if (error || !data) throw new Error(`foods insert: ${error?.code ?? 'no row'}`);
   return { food: data as Food, created: true, replacedIds, numbers };
 }
+
+export type CatalogFoodInput = {
+  source: 'off' | 'web'; source_ref: string; barcode?: string | null; name: string; brand?: string | null; isDrink?: boolean;
+  per100: { kcal: number; protein: number | null; fat: number | null; carbs: number | null; satfat?: number | null; sugar?: number | null };
+  servingG?: number | null;
+};
+
+/**
+ * A product found in Open Food Facts or on the web, saved to the personal base with its source
+ * URL (lookup_product, D26). Reuses the same barcode or name + brand when the numbers match;
+ * different numbers archive the old row, so later logs use the newest source.
+ */
+export async function saveCatalogFood(sb: SupabaseClient, userId: string, f: CatalogFoodInput): Promise<{ food: Food; created: boolean }> {
+  const name = cleanFoodName(f.name) || f.name.trim();
+  const brand = f.brand?.trim() || null;
+  const per100 = { kcal: f.per100.kcal, protein: f.per100.protein, fat: f.per100.fat, carbs: f.per100.carbs };
+  const { data: mine } = await sb.from('foods').select('*').eq('user_id', userId).is('archived_at', null)
+    .or(f.barcode ? `barcode.eq.${f.barcode},source_ref.eq.${f.source_ref}` : `source_ref.eq.${f.source_ref}`);
+  const byKey = ((mine ?? []) as Food[]);
+  const { data: named } = await sb.from('foods').select('*').eq('user_id', userId).is('archived_at', null).in('source', ['off', 'web', 'user', 'label'])
+    .ilike('name_ru', name.replace(/[\\%_]/g, (m) => `\\${m}`));
+  const same = [...byKey, ...((named ?? []) as Food[]).filter((x) => foodKey(x.name_ru, x.brand) === foodKey(name, brand))];
+  const toNullable = (x: Food) => ({ kcal: Number(x.kcal_100g), protein: x.protein_100g == null ? null : Number(x.protein_100g), fat: x.fat_100g == null ? null : Number(x.fat_100g), carbs: x.carbs_100g == null ? null : Number(x.carbs_100g) });
+  const identical = same.find((x) => sameNumbers(toNullable(x), per100));
+  if (identical) return { food: identical, created: false };
+  const stale = [...new Set(same.map((x) => x.id))];
+  if (stale.length) await sb.from('foods').update({ archived_at: new Date().toISOString() }).in('id', stale).eq('user_id', userId);
+  const allMacros = per100.protein != null && per100.fat != null && per100.carbs != null;
+  const { data, error } = await sb.from('foods').insert({
+    user_id: userId, source: f.source, source_ref: f.source_ref, barcode: f.barcode ?? null, name_ru: name.slice(0, 160), brand,
+    category: f.isDrink ? 'drinks' : null, state: 'as_is', kcal_100g: per100.kcal, protein_100g: per100.protein, fat_100g: per100.fat, carbs_100g: per100.carbs,
+    satfat_100g: f.per100.satfat ?? null, sugar_100g: f.per100.sugar ?? null,
+    default_portion_g: f.servingG ?? (f.isDrink ? 330 : 100), portions: f.servingG ? [{ label: '1 порция', g: f.servingG }] : [],
+    confidence: allMacros ? 'medium' : 'user_kcal_only',
+    notes: f.source === 'off' ? 'Open Food Facts (ODbL), краудсорсинг — сверь с упаковкой' : `Из интернета: ${f.source_ref}`,
+  }).select('*').single();
+  if (error || !data) throw new Error(`catalog food insert: ${error?.code ?? 'no row'}`);
+  return { food: data as Food, created: true };
+}

@@ -29,6 +29,8 @@ export type AgentUi = {
   loggedMeals: LoggedMeal[];
   /** Other writes (weight, checklist, reminders…) shown as chips under the reply. */
   actions: AgentAction[];
+  /** «Что съесть» options with a one-tap «Записать» (Telegram buttons). */
+  suggestions?: { title: string; items: { food_id: string; name: string; grams: number }[]; kcal: number; protein_g: number }[];
 };
 
 export function emptyUi(): AgentUi {

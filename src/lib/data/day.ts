@@ -7,6 +7,8 @@ export type DayMeal = {
   id: string; root_id: string; eaten_at: string; logged_at: string; slot: string | null; title: string | null;
   input_method: string; template_id: string | null; confidence: number | null; kcal: number; protein_g: number;
   fat_g: number; carbs_g: number; note: string | null; is_labeled: boolean;
+  /** Saturated fat of the meal; null when none of its foods know it. */
+  satfat_g?: number | null;
   /** `partial`: only calories are known for this item (protein/fat/carbs counted as 0). */
   items: { id: string; food_id: string | null; name: string; grams: number; kcal: number; protein_g: number; fat_g: number; carbs_g: number; confidence: number | null; source: string; partial: boolean }[];
 };
@@ -22,7 +24,7 @@ export type DaySummary = {
   trainingDay: boolean;
   goal: Goal | null;
   /** `macros_incomplete`: items whose protein/fat/carbs are unknown (counted as 0). */
-  totals: { kcal: number; protein_g: number; fat_g: number; carbs_g: number; meals_count: number; macros_incomplete: number };
+  totals: { kcal: number; protein_g: number; fat_g: number; carbs_g: number; meals_count: number; macros_incomplete: number; satfat_g: number | null };
   remaining: { kcal_to_min: number; kcal_to_max: number; protein_to_min: number; fat_to_min: number } | null;
   status: { kcal: 'under' | 'in' | 'over'; protein: 'under' | 'in' | 'over'; belowFloor: boolean } | null;
   meals: DayMeal[];
@@ -39,8 +41,9 @@ export function totalsOf(meals: DayMeal[]): DaySummary['totals'] {
     kcal: a.kcal + m.kcal, protein_g: a.protein_g + m.protein_g, fat_g: a.fat_g + m.fat_g, carbs_g: a.carbs_g + m.carbs_g,
     meals_count: a.meals_count + (m.slot === 'supplement' ? 0 : 1),
     macros_incomplete: a.macros_incomplete + m.items.filter((i) => i.partial).length,
-  }), { kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0, meals_count: 0, macros_incomplete: 0 });
-  return { ...sum, kcal: Math.round(sum.kcal), protein_g: r1(sum.protein_g), fat_g: r1(sum.fat_g), carbs_g: r1(sum.carbs_g) };
+    satfat_g: m.satfat_g != null ? (a.satfat_g ?? 0) + Number(m.satfat_g) : a.satfat_g,
+  }), { kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0, meals_count: 0, macros_incomplete: 0, satfat_g: null as number | null });
+  return { ...sum, kcal: Math.round(sum.kcal), protein_g: r1(sum.protein_g), fat_g: r1(sum.fat_g), carbs_g: r1(sum.carbs_g), satfat_g: sum.satfat_g != null ? r1(sum.satfat_g) : null };
 }
 
 /** What is left to the goal and where the day stands. */
@@ -67,7 +70,7 @@ export async function getDaySummary(sb: SupabaseClient, userId: string, day?: st
   const d = day ?? today;
   const [goal, mealsRes, itemsRes, marksRes] = await Promise.all([
     goalForDay(sb, userId, d),
-    sb.from('meals').select('id, root_id, eaten_at, logged_at, slot, title, input_method, template_id, confidence, kcal, protein_g, fat_g, carbs_g, note, is_labeled, meal_items(id, food_id, name, grams, kcal, protein_g, fat_g, carbs_g, confidence, source, sort_order, per100)')
+    sb.from('meals').select('id, root_id, eaten_at, logged_at, slot, title, input_method, template_id, confidence, kcal, protein_g, fat_g, carbs_g, satfat_g, note, is_labeled, meal_items(id, food_id, name, grams, kcal, protein_g, fat_g, carbs_g, confidence, source, sort_order, per100)')
       .eq('user_id', userId).eq('local_day', d).eq('is_current', true).eq('status', 'confirmed').order('eaten_at'),
     sb.from('checklist_items').select('key, label, kind, unit, target, due_time, training_day_only, sort_order').eq('user_id', userId).eq('active', true).order('sort_order'),
     sb.from('checklist_state').select('item_key, done, value, source').eq('user_id', userId).eq('local_day', d),
@@ -76,6 +79,7 @@ export async function getDaySummary(sb: SupabaseClient, userId: string, day?: st
   const meals: DayMeal[] = (mealsRes.data ?? []).map((m) => ({
     ...(m as unknown as DayMeal),
     kcal: Number(m.kcal), protein_g: Number(m.protein_g), fat_g: Number(m.fat_g), carbs_g: Number(m.carbs_g),
+    satfat_g: m.satfat_g != null ? Number(m.satfat_g) : null,
     items: ((m.meal_items ?? []) as unknown as (Omit<DayMeal['items'][number], 'partial'> & { sort_order: number; per100: { partial?: boolean } | null })[])
       .sort((a, b) => a.sort_order - b.sort_order)
       .map(({ sort_order: _s, per100, ...i }) => ({

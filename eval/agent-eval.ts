@@ -25,9 +25,15 @@ async function main() {
   const results = [];
   for (const s of SCENARIOS) {
     const world = scenarioWorld(s);
-    const r = await runAgent({ sb, userId: data.user!.id, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: world, persist: false, history: scenarioHistory(s) });
+    const r = await runAgent({
+      sb, userId: data.user!.id, trigger: s.proactive ? 'cron' : 'eval', userText: s.proactive ? undefined : s.prompt, dryRun: true, dryWorld: world, persist: false, history: scenarioHistory(s),
+      proactive: s.proactive ? { reason: s.proactive.reason, ruleKey: s.proactive.ruleKey ?? null, sentToday: 0, lastSentAt: null } : undefined,
+    });
     const tools = r.toolCalls.map((t) => t.tool);
-    const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error', effects: world.effects, choices: Boolean(r.ui.choices) });
+    const fails = checkScenario(s, {
+      tools, text: r.text, error: r.decision === 'error', effects: world.effects, choices: Boolean(r.ui.choices),
+      suggestions: (r.ui.suggestions ?? []).map((o) => ({ kcal: o.kcal, protein_g: o.protein_g })), nudges: world.nudges.length, sent: r.ui.sentMessages,
+    });
     results.push({ id: s.id, pass: fails.length === 0, fails, tools, model: r.model, latencyMs: r.latencyMs, reply: r.text.slice(0, 500) });
     console.log(`${fails.length ? '✗' : '✓'} ${s.id} [${tools.join(' → ') || '-'}] ${r.latencyMs}ms ${fails.join('; ')}`);
   }

@@ -15,6 +15,9 @@ export type Food = {
   protein_100g: number | null;
   fat_100g: number | null;
   carbs_100g: number | null;
+  /** Saturated fat and sugar per 100 g; null = unknown (not zero). */
+  satfat_100g?: number | null;
+  sugar_100g?: number | null;
   kcal_low_100g?: number | null;
   kcal_high_100g?: number | null;
   raw_food_id?: string | null;
@@ -27,7 +30,7 @@ export type Food = {
 };
 
 /** `partial`: protein/fat/carbs are unknown (counted as 0 and flagged in day totals). */
-export type Per100 = { kcal: number; protein: number; fat: number; carbs: number; partial?: boolean };
+export type Per100 = { kcal: number; protein: number; fat: number; carbs: number; partial?: boolean; satfat?: number | null; sugar?: number | null };
 
 export type Macros = { kcal: number; protein_g: number; fat_g: number; carbs_g: number };
 
@@ -46,6 +49,8 @@ export type MealItemInput = Macros & {
   model_label?: string | null;
   edited?: boolean;
   kcal_range?: [number, number] | null;
+  satfat_g?: number | null;
+  sugar_g?: number | null;
 };
 
 export type Goal = {

@@ -9,7 +9,9 @@ import { getChatgptToken } from '@/lib/llm/chatgpt';
 import { classifyError } from '@/lib/llm/router';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { runAgent } from '@/lib/agent/run';
-import { checkScenario, scenarioHistory, scenarioWorld, SCENARIOS } from '@/lib/agent/scenarios';
+import { checkScenario, scenarioHistory, scenarioWorld, SCENARIOS, type Scenario } from '@/lib/agent/scenarios';
+import { EVAL_IMAGES } from '@/lib/agent/eval-images';
+import type { AgentImage } from '@/lib/agent/run';
 
 // 15 scenarios × up to ~40 s each, three at a time.
 export const maxDuration = 300;
@@ -64,6 +66,10 @@ async function resolveUser(req: Request): Promise<{ userId: string; sb: Supabase
 }
 
 /** Agent eval scenarios on the real prompt and data, write tools simulated. */
+function scenarioImages(s: Scenario): AgentImage[] {
+  return (s.images ?? []).filter((k) => EVAL_IMAGES[k]).map((k) => ({ mediaId: crypto.randomUUID(), path: `eval/${k}`, data: new Uint8Array(Buffer.from(EVAL_IMAGES[k], 'base64')), mime: 'image/jpeg' }));
+}
+
 async function runScenarios(sb: SupabaseClient, userId: string, only?: string[], model?: string) {
   const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null }[] = [];
   const selected = only?.length ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
@@ -71,12 +77,17 @@ async function runScenarios(sb: SupabaseClient, userId: string, only?: string[],
     const batch = selected.slice(i, i + SCENARIO_CONCURRENCY);
     const worlds = batch.map((s) => scenarioWorld(s));
     const runs = await Promise.all(batch.map((s, j) => runAgent({
-      sb, userId, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: worlds[j], persist: false, history: scenarioHistory(s), modelOverride: model ?? null,
+      sb, userId, trigger: s.proactive ? 'cron' : 'eval', userText: s.proactive ? undefined : s.prompt, images: scenarioImages(s), dryRun: true, dryWorld: worlds[j],
+      persist: false, history: scenarioHistory(s), modelOverride: model ?? null,
+      proactive: s.proactive ? { reason: s.proactive.reason, ruleKey: s.proactive.ruleKey ?? null, sentToday: 0, lastSentAt: null } : undefined,
     })));
     batch.forEach((s, j) => {
       const r = runs[j];
       const tools = r.toolCalls.map((t) => t.tool);
-      const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error', effects: worlds[j].effects, choices: Boolean(r.ui.choices) });
+      const fails = checkScenario(s, {
+        tools, text: r.text, error: r.decision === 'error', effects: worlds[j].effects, choices: Boolean(r.ui.choices),
+        suggestions: (r.ui.suggestions ?? []).map((o) => ({ kcal: o.kcal, protein_g: o.protein_g })), nudges: worlds[j].nudges.length, sent: r.ui.sentMessages,
+      });
       out.push({ id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2), model: r.model });
     });
   }

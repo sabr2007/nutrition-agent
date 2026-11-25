@@ -14,6 +14,7 @@ import { personalContext } from '@/lib/recognition/pipeline';
 import { acceptableTitle, mealTitle } from './meal-title';
 import { currentDryMeal, mealTotals, type DryMeal, type DryMealItem } from './dry-world';
 import type { PendingAction, ToolCtx } from './tool-ctx';
+import { fatWarningFor } from './fat-warning';
 
 // Meal-writing tools (D24): log_meal never logs a food that is not what the person named —
 // weak matches come back as `needs_food`; save_user_food turns the person's own numbers into
@@ -235,9 +236,10 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           const meal: DryMeal = { id, root_id: id, title, slot, eaten_at: eatenAt.toISOString(), created_at: new Date().toISOString(), by_agent: true, status: 'confirmed', is_current: true, items: resolved.map((r) => dryItem(r.food, r.grams)) };
           ctx.dry.meals.set(id, meal);
           const back = readBack(meal);
-          ctx.dry.effects.push({ kind: 'log', meal_id: id, title, kcal: back.kcal });
+          ctx.dry.effects.push({ kind: 'log', meal_id: id, title, kcal: back.kcal, grams: r1(meal.items.reduce((g, i) => g + i.grams, 0)) });
           ctx.ui.loggedMeals.push({ id, title, kcal: back.kcal, protein_g: back.protein_g, fat_g: back.fat_g, carbs_g: back.carbs_g });
-          return { saved: true, dry_run: true, ...back };
+          const fat = await fatWarningFor(ctx, { id, day, fat_g: back.fat_g, items: meal.items.map((i) => ({ name: i.name, grams: i.grams, kcal: i.kcal, protein_g: i.protein_g, fat_g: i.fat_g })) });
+          return { saved: true, dry_run: true, ...back, fat_warning: fat };
         }
 
         // Honest uncertainty for the reply: kcal range from composite dishes, low-confidence items.
@@ -257,7 +259,12 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           items,
         }, { checklistKey: template?.checklist_key ?? null });
         ctx.ui.loggedMeals.push({ id: saved.id, title, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g });
+        const fat = await fatWarningFor(ctx, {
+          id: saved.id, day: saved.local_day, fat_g: saved.fat_g,
+          items: resolved.map((r) => { const m = macrosFor(r.grams, per100Of(r.food)); return { name: r.food.name_ru, grams: r.grams, kcal: m.kcal, protein_g: m.protein_g, fat_g: m.fat_g }; }),
+        }).catch(() => null);
         return {
+          fat_warning: fat,
           saved: true, meal_id: saved.id, title, day: saved.local_day, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g,
           kcal_range: range[1] - range[0] > 40 ? [Math.round(range[0]), Math.round(range[1])] : null,
           low_confidence_items: lowConfidence,

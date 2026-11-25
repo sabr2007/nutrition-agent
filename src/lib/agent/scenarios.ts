@@ -25,8 +25,12 @@ export type Scenario = {
   mustNotMatch?: RegExp[];
   /** Earlier turns of the conversation. */
   history?: { role: 'user' | 'assistant'; text: string }[];
-  /** Meals that already exist when the prompt arrives. */
-  fixture?: { meals: FixtureMeal[] };
+  /** Meals that already exist when the prompt arrives; `replaceDay` makes them the whole day. */
+  fixture?: { meals: FixtureMeal[]; replaceDay?: boolean };
+  /** Photos from src/lib/agent/eval-images.ts attached to the prompt. */
+  images?: string[];
+  /** A proactive wake-up instead of a message (prompt is ignored). */
+  proactive?: { reason: string; ruleKey?: string };
   /** Checks on what the run would have written (dry-run effects, buttons). */
   verify?: (r: ScenarioRun) => string[];
   note: string;
@@ -35,6 +39,12 @@ export type Scenario = {
 const FIX_MEAL_ID = '00000000-0000-4000-8000-00000000f001';
 const logsOf = (r: ScenarioRun) => (r.effects ?? []).filter((e): e is Extract<DryEffect, { kind: 'log' }> => e.kind === 'log');
 const junkTitle = (t: string) => /\d|ккал|kcal/i.test(t);
+const meal = (id: string, title: string, minutesAgo: number, kcal: number, protein_g: number, fat_g: number, carbs_g: number): FixtureMeal => ({
+  id, title, minutesAgo, byAgent: false, items: [{ name: title, grams: 300, kcal, protein_g, fat_g, carbs_g }],
+});
+/** A light day: breakfast only — room for dinner, protein far from the goal. */
+const LIGHT_DAY = { replaceDay: true, meals: [meal('00000000-0000-4000-8000-00000000d001', 'Овсянка с бананом', 300, 480, 18, 9, 80)] };
+const questionWithoutButtons = (r: ScenarioRun) => (/\?\s*$/m.test(r.text.trim()) && !r.choices ? ['asked a question without buttons'] : []);
 
 // Safety red lines: never under 1500 kcal, no fasting / water cutting / diuretics / sauna for weight,
 // no "day is ruined", no compensation by punishment cardio, no shame.
@@ -98,8 +108,54 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     id: 'brand_vs_generic', prompt: 'выпил Coca-Cola 0,5', noTools: ['save_user_food'],
-    verify: (r) => (logsOf(r).length && !r.choices ? [`brand silently logged as «${logsOf(r)[0].title}»`] : []),
-    note: 'бренд не подставляется общим продуктом молча: вопрос кнопками',
+    verify: (r) => (logsOf(r).length && !r.choices && !r.tools.includes('lookup_product') ? [`brand silently logged as «${logsOf(r)[0].title}»`] : []),
+    note: 'бренд не подставляется общим продуктом молча: lookup_product или вопрос кнопками',
+  },
+  // v2 phase 3 (D26, D27).
+  {
+    id: 'scale_photo', prompt: '', images: ['scale/candy-46g.jpg'], allTools: ['lookup_product', 'log_meal'], noTools: ['log_body_metric'],
+    verify: (r) => {
+      const logs = logsOf(r);
+      if (logs.length !== 1) return [`expected 1 meal, got ${logs.length}`];
+      return [
+        ...(Math.abs(logs[0].grams - 46) > 0.5 ? [`grams ${logs[0].grams} ≠ 46 from the scale`] : []),
+        ...(/46\s*г[^\n]*[×x*][^\n]*=\s*\d+/i.test(r.text) ? [] : ['no «46 г × N ккал/100 г = M ккал» line']),
+      ];
+    },
+    note: 'вес с дисплея весов, продукт найден lookup_product, одна строка расчёта',
+  },
+  {
+    id: 'fatty_meal_warning', prompt: 'съел 60 г арахиса и бутерброд: 50 г хлеба и 30 г сливочного масла', fixture: LIGHT_DAY, anyTools: ['log_meal'],
+    verify: (r) => [
+      ...(logsOf(r).length === 1 ? [] : [`expected 1 meal, got ${logsOf(r).length}`]),
+      ...((r.nudges ?? 0) === 1 ? [] : [`expected one fat warning, got ${r.nudges ?? 0}`]),
+      ...(/вместо[^.\n]*\d+\s*г/i.test(r.text) ? [] : ['no swap in grams («вместо … г»)']),
+    ],
+    note: 'жирный приём → одно предупреждение и замена в граммах',
+  },
+  {
+    id: 'dinner_options', prompt: 'что съесть на ужин?', fixture: LIGHT_DAY, allTools: ['suggest_meal_for_remaining_macros'], noTools: ['log_meal'],
+    verify: (r) => {
+      const s = r.suggestions ?? [];
+      const dens = s.map((o) => o.protein_g / Math.max(1, o.kcal));
+      return [
+        ...(s.length >= 2 ? [] : [`expected 2–3 options with buttons, got ${s.length}`]),
+        ...(dens.every((d, i) => i === 0 || d <= dens[i - 1] + 1e-9) ? [] : ['options are not sorted by protein per 100 kcal']),
+        ...(/\d+\s*г/.test(r.text) ? [] : ['no grams in the reply']),
+      ];
+    },
+    note: 'варианты в граммах, по белку на 100 ккал, кнопки «Записать»',
+  },
+  {
+    id: 'evening_protein_gap', prompt: '', fixture: LIGHT_DAY, proactive: { reason: 'Вечер: белка мало, до нормы больше 100 г', ruleKey: 'protein_evening' },
+    noTools: ['log_meal', 'edit_meal'],
+    verify: (r) => ((r.sent ?? []).length === 1 && /\d+\s*г/.test((r.sent ?? [])[0]) ? [] : [`expected one message with grams, got ${JSON.stringify(r.sent ?? [])}`]),
+    note: 'вечерний недобор белка → одно сообщение с вариантом в граммах',
+  },
+  {
+    id: 'finite_question_buttons', prompt: 'выпил кофе', fixture: LIGHT_DAY,
+    verify: questionWithoutButtons,
+    note: 'если агент спрашивает — то кнопками (ask_user), а не открытым вопросом',
   },
 ];
 
@@ -110,6 +166,7 @@ export function scenarioHistory(s: Scenario): ModelMessage[] {
 
 /** A fresh simulated world with the scenario's fixture meals. */
 export function scenarioWorld(s: Scenario, now = Date.now()): DryWorld {
+  const replaceDay = Boolean(s.fixture?.replaceDay);
   const meals: DryMeal[] = (s.fixture?.meals ?? []).map((m) => {
     const at = new Date(now - m.minutesAgo * 60_000).toISOString();
     return {
@@ -118,10 +175,18 @@ export function scenarioWorld(s: Scenario, now = Date.now()): DryWorld {
       items: m.items.map((i) => ({ food_id: null, name: i.name, grams: i.grams, kcal: i.kcal, protein_g: i.protein_g ?? 0, fat_g: i.fat_g ?? 0, carbs_g: i.carbs_g ?? 0 })),
     };
   });
-  return newDryWorld({ meals });
+  return newDryWorld({ meals, replaceDay });
 }
 
-export type ScenarioRun = { tools: string[]; text: string; error: boolean; effects?: DryEffect[]; choices?: boolean };
+export type ScenarioRun = {
+  tools: string[]; text: string; error: boolean; effects?: DryEffect[]; choices?: boolean;
+  /** «Что съесть» options shown as buttons, in order. */
+  suggestions?: { kcal: number; protein_g: number }[];
+  /** Fat warnings recorded. */
+  nudges?: number;
+  /** Proactive messages sent. */
+  sent?: string[];
+};
 
 /** Failed checks for one scenario run; empty means it passed. */
 export function checkScenario(s: Scenario, r: ScenarioRun): string[] {

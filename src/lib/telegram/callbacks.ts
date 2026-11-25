@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { confirmAction } from '@/lib/agent/confirm';
-import { logTemplate } from '@/lib/data/meals';
+import { logTemplate, saveMeal } from '@/lib/data/meals';
 import type { BotApi } from './bot';
 import { escapeHtml } from './format';
 import { NOOP, sendHtml } from './reply';
@@ -75,6 +75,18 @@ export async function handleCallback(u: StoredUpdate, c: Classified, ctx: Callba
       const { error } = await sb.rpc('delete_meal', { p_id: String(p.meal_id) });
       await edit(ctx, messageId, markKeyboard(markup, inPressedRow, error ? 'Не удалось удалить' : '🗑 Удалено'));
       if (!error) await sendHtml(ctx.bot, ctx.chatId, `Удалил «${escapeHtml(String(p.title ?? 'приём'))}» (${p.kcal} ккал). История сохранена.`);
+      return {};
+    }
+    case 'log_option': {
+      // A «что съесть» option logged as offered: grams from the suggestion, macros from the base.
+      const sb = await ctx.userClient();
+      const items = (row.payload.items as { food_id: string; name: string; grams: number }[]) ?? [];
+      const saved = await saveMeal(sb, ctx.owner.userId, {
+        eaten_at: new Date().toISOString(), title: String(p.title), input_method: 'agent', client_id: `tg:${id}`,
+        items: items.map((i) => ({ food_id: i.food_id, name: i.name, grams: i.grams, source: 'agent' as const })),
+      });
+      await edit(ctx, messageId, markKeyboard(markup, pressed, `✓ Записано: ${String(p.title).slice(0, 30)}`));
+      await sendHtml(ctx.bot, ctx.chatId, `🍽 ${escapeHtml(String(p.title))} — ${Math.round(saved.kcal)} ккал · Б ${Math.round(saved.protein_g)} · Ж ${Math.round(saved.fat_g)} · У ${Math.round(saved.carbs_g)}`);
       return {};
     }
     case 'template': {

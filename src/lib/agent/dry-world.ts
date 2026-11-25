@@ -20,17 +20,20 @@ export type DryMeal = {
 
 export type DryEffect =
   | { kind: 'food'; food_id: string; name: string; kcal_100g: number }
-  | { kind: 'log'; meal_id: string; title: string; kcal: number }
+  | { kind: 'log'; meal_id: string; title: string; kcal: number; grams: number }
   | { kind: 'edit'; meal_id: string; root_id: string; title: string; kcal: number }
   | { kind: 'delete'; meal_id: string; root_id: string; immediate: boolean };
 
-export type DryWorld = { foods: Map<string, Food>; meals: Map<string, DryMeal>; effects: DryEffect[] };
+/** `replaceDay`: the simulated meals are the whole day (deterministic evals), not added to the real one. */
+export type DryWorld = { foods: Map<string, Food>; meals: Map<string, DryMeal>; effects: DryEffect[]; nudges: { kind: string; meal_id: string }[]; replaceDay?: boolean };
 
-export function newDryWorld(fixture?: { meals?: DryMeal[]; foods?: Food[] }): DryWorld {
+export function newDryWorld(fixture?: { meals?: DryMeal[]; foods?: Food[]; replaceDay?: boolean }): DryWorld {
   return {
+    replaceDay: fixture?.replaceDay ?? false,
     foods: new Map((fixture?.foods ?? []).map((f) => [f.id, f])),
     meals: new Map((fixture?.meals ?? []).map((m) => [m.id, m])),
     effects: [],
+    nudges: [],
   };
 }
 
@@ -61,8 +64,8 @@ function asDayMeal(m: DryMeal): DayMeal {
 export function overlayDay(s: DaySummary, w: DryWorld | undefined): DaySummary {
   if (!w || !s.isToday) return s;
   const extra = [...w.meals.values()].filter((m) => m.is_current && m.status === 'confirmed').map(asDayMeal);
-  if (!extra.length && !w.meals.size) return s;
-  const meals = [...s.meals, ...extra].sort((a, b) => a.eaten_at.localeCompare(b.eaten_at));
+  if (!extra.length && !w.meals.size && !w.replaceDay) return s;
+  const meals = [...(w.replaceDay ? [] : s.meals), ...extra].sort((a, b) => a.eaten_at.localeCompare(b.eaten_at));
   const totals = totalsOf(meals);
   return { ...s, meals, totals, ...progressOf(s.goal, totals) };
 }

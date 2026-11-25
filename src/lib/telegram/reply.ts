@@ -51,6 +51,10 @@ export function buildReply(r: AgentResult, ctx: Pick<ReplyCtx, 'userId' | 'chatI
   for (const m of r.ui.proposedMemories) {
     rows.push([button('Запомнить', 'memory', { memory_id: m.id, accept: true, agent_message_id: r.messageId }), button('Не надо', 'memory', { memory_id: m.id, accept: false, agent_message_id: r.messageId })]);
   }
+  for (const o of r.ui.suggestions ?? []) {
+    const label = `Записать: ${o.title.length > 28 ? `${o.title.slice(0, 27)}…` : o.title} · ${o.kcal} ккал`;
+    rows.push([button(label, 'log_option', { title: o.title, items: o.items })]);
+  }
   for (const m of r.ui.loggedMeals.filter((x) => x.id !== 'dry-run')) {
     rows.push([
       { text: '✏️ Исправить', web_app: { url: `${ctx.appUrl}/?meal=${encodeURIComponent(m.id)}` } },
