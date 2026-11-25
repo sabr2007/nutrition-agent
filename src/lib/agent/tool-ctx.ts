@@ -13,6 +13,8 @@ export type ToolCtx = {
   ui: AgentUi;
   /** In eval mode writes are simulated. */
   dryRun?: boolean;
+  /** Simulated clock of a proactive eval («19:30»); tools report this time instead of the real one. */
+  now?: Date;
   /** Simulated foods and meals of a dry run (evals): writes land here instead of the database. */
   dry?: DryWorld;
   /** Photos attached to the current chat message: meals logged from them keep the link. */

@@ -233,7 +233,7 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
   const ui = emptyUi();
   let trace: TraceCall[] = [];
   const toolCtx: ToolCtx = {
-    sb, userId, profile, runId, trigger: opts.trigger, ui, dryRun: opts.dryRun, dry,
+    sb, userId, profile, runId, trigger: opts.trigger, ui, dryRun: opts.dryRun, dry, now: opts.now,
     photo: images.length ? { mediaIds: images.map((i) => i.mediaId), model: spec.model } : undefined,
   };
   const purpose = mode === 'chat' ? (opts.deep ? 'agent_chat_deep' : 'agent_chat') : 'agent_proactive';

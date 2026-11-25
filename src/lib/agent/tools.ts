@@ -59,7 +59,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
           totals: s.totals, remaining: s.remaining, status: s.status,
           meals: s.meals.map((m) => ({ id: m.id, time: localParts(new Date(m.eaten_at), ctx.profile.timezone).hhmm, title: m.title, slot: m.slot, kcal: m.kcal, protein_g: m.protein_g, by: m.input_method, items: m.items.map((i) => `${i.name} ${i.grams}г${i.partial ? ' (только ккал)' : ''}`) })),
           checklist: s.checklist.map((c) => ({ key: c.key, label: c.label, done: c.done, value: c.value, due: c.due_time })),
-          now_local: localParts(new Date(), ctx.profile.timezone).hhmm,
+          now_local: localParts(ctx.now ?? new Date(), ctx.profile.timezone).hhmm,
         };
       },
     }),
@@ -308,7 +308,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         const weekday = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'][isoWeekdayOf(day)];
         return {
           day, weekday, training_day: isTrainingDay(p, day), training: p.training, quiet_hours: [p.quiet_start, p.quiet_end],
-          now_local: localParts(new Date(), p.timezone).hhmm, today: todayFor(p),
+          now_local: localParts(ctx.now ?? new Date(), p.timezone).hhmm, today: todayFor(p, ctx.now),
           usual_schedule: templates.filter((t) => t.default_time && (!t.training_day_only || isTrainingDay(p, day))).map((t) => `${t.default_time} ${t.name}`),
           goal: goal ? { name: goal.name, ends_on: goal.ends_on, days_left: goal.ends_on ? Math.round((Date.parse(goal.ends_on) - Date.parse(day)) / 86_400_000) : null } : null,
           tomorrow: addDays(day, 1),
