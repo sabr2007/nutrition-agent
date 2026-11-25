@@ -28,7 +28,8 @@ const SAUCE_WORDS = /заправ|соус|майонез|кетчуп|dressing|
  */
 export function plausible(food: Food, query: string | undefined): boolean {
   if (!query) return true;
-  const dense = Number(food.kcal_100g) >= 600 && (food.category === 'fats' || Number(food.fat_100g) >= 60);
+  // Nuts are fat-dense too, but «орехи» naming nuts is not a mismatch.
+  const dense = Number(food.kcal_100g) >= 600 && (food.category === 'fats' || (Number(food.fat_100g) >= 60 && food.category !== 'nuts'));
   if (dense && !FAT_WORDS.test(query)) return false;
   // Calorie-dense sauces/dressings only when the query names a sauce ("салат цезарь" ≠ dressing).
   if (food.category === 'sauces' && Number(food.kcal_100g) >= 250 && !SAUCE_WORDS.test(query)) return false;
