@@ -57,7 +57,7 @@ export function MealList({ meals, timezone, onChange }: { meals: DayMeal[]; time
                   {m.items.map((i) => (
                     <li key={i.id} className="flex items-baseline justify-between gap-2">
                       <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                      <span className="tabular font-mono text-xs text-ink-2">{fmt(i.grams)} г · {fmt(i.kcal)} · б {fmt(i.protein_g, 1)}</span>
+                      <span className="tabular font-mono text-xs text-ink-2">{fmt(i.grams)} г · {fmt(i.kcal)}{i.partial ? ' · только ккал' : ` · б ${fmt(i.protein_g, 1)}`}</span>
                     </li>
                   ))}
                 </ul>

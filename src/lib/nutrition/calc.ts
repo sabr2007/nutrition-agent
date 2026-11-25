@@ -4,11 +4,13 @@ import type { Food, FoodState, Macros, MealItemInput, Per100, ItemSource } from 
 export const r1 = (n: number): number => Math.round(n * 10) / 10;
 
 export function per100Of(food: Pick<Food, 'kcal_100g' | 'protein_100g' | 'fat_100g' | 'carbs_100g'>): Per100 {
+  const partial = food.protein_100g == null || food.fat_100g == null || food.carbs_100g == null;
   return {
     kcal: Number(food.kcal_100g),
-    protein: Number(food.protein_100g),
-    fat: Number(food.fat_100g),
-    carbs: Number(food.carbs_100g),
+    protein: Number(food.protein_100g ?? 0),
+    fat: Number(food.fat_100g ?? 0),
+    carbs: Number(food.carbs_100g ?? 0),
+    ...(partial ? { partial: true } : {}),
   };
 }
 

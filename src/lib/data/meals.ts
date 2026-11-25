@@ -10,7 +10,7 @@ export const MealItemSchema = z.object({
   name: z.string().min(1).max(200),
   grams: z.number().min(0).max(5000),
   state: z.enum(['raw', 'cooked', 'dry', 'as_is']).nullable().optional(),
-  per100: z.object({ kcal: z.number().min(0).max(1000), protein: z.number().min(0).max(100), fat: z.number().min(0).max(100), carbs: z.number().min(0).max(100) }).nullable().optional(),
+  per100: z.object({ kcal: z.number().min(0).max(1000), protein: z.number().min(0).max(100), fat: z.number().min(0).max(100), carbs: z.number().min(0).max(100), partial: z.boolean().optional() }).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
   source: z.enum(['model', 'user', 'template', 'scale', 'barcode', 'agent', 'repeat']).default('user'),
   model_grams: z.number().nullable().optional(),

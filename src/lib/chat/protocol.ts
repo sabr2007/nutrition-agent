@@ -60,6 +60,7 @@ export const TOOL_LABELS: Record<string, string> = {
   load_skill: 'Открываю навык',
   ask_user: 'Готовлю вопрос',
   save_label_food: 'Сохраняю продукт с этикетки',
+  save_user_food: 'Сохраняю продукт с твоими цифрами',
 };
 
 export function toolLabel(name: string): string {

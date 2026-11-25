@@ -1,53 +1,32 @@
 import 'server-only';
 import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { getDaySummary } from '@/lib/data/day';
-import { listTemplates, saveMeal, markChecklist } from '@/lib/data/meals';
-import { getProfile, todayFor, isTrainingDay, goalForDay, type Profile } from '@/lib/data/profile';
+import { listTemplates, markChecklist } from '@/lib/data/meals';
+import { getProfile, todayFor, isTrainingDay, goalForDay } from '@/lib/data/profile';
 import { addDays, instantForLocal, localParts, isoWeekdayOf } from '@/lib/nutrition/day';
-import { macrosFor, r1 } from '@/lib/nutrition/calc';
+import { macrosFor, per100Of, r1 } from '@/lib/nutrition/calc';
 import type { Food } from '@/lib/nutrition/types';
-import { pickBest, searchFoodsSmart } from '@/lib/recognition/match';
+import { pickBest, plausible, searchFoodsSmart } from '@/lib/recognition/match';
+import { relevanceGate } from '@/lib/recognition/relevance';
 import { personalContext } from '@/lib/recognition/pipeline';
 import { LabelOutput, normalizeLabel } from '@/lib/recognition/label';
 import { createPersonalFood } from '@/lib/data/foods';
-import type { AgentAction, LoggedMeal } from '@/lib/chat/protocol';
+import type { PendingAction, ToolCtx } from './tool-ctx';
+import { dateSchema, hhmm, mealTools } from './meal-tools';
+import { overlayDay } from './dry-world';
 import { suggestForRemaining } from './suggest';
 import { buildShoppingList } from './shopping';
 import { getTrends } from './trends';
 
-export type ToolCtx = {
-  sb: SupabaseClient;
-  userId: string;
-  profile: Profile;
-  runId: string;
-  trigger: 'chat' | 'cron' | 'event' | 'rule' | 'eval' | 'system';
-  /** Collected UI side effects (buttons, proposed memories, confirmations, sent messages). */
-  ui: AgentUi;
-  /** In eval mode writes are simulated. */
-  dryRun?: boolean;
-  /** Photos attached to the current chat message: meals logged from them keep the link. */
-  photo?: { mediaIds: string[]; model: string };
-};
+export type { AgentUi, PendingAction, ToolCtx } from './tool-ctx';
+export { emptyUi } from './tool-ctx';
 
-export type PendingAction = { id: string; kind: 'update_goal' | 'delete_meal'; summary: string; params: Record<string, unknown> };
-export type AgentUi = {
-  choices?: { question: string; options: string[] };
-  proposedMemories: { id: string; content: string }[];
-  pendingActions: PendingAction[];
-  sentMessages: string[];
-  loggedMeals: LoggedMeal[];
-  /** Other writes (weight, checklist, reminders…) shown as chips under the reply. */
-  actions: AgentAction[];
-};
 
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD local day; default today');
-const hhmm = z.string().regex(/^\d{1,2}:\d{2}$/);
-
+const orNull = (v: number | null | undefined) => (v == null ? null : Number(v));
 const compactFood = (f: Food) => ({
-  id: f.id, name: f.name_ru, state: f.state, kcal_100g: Number(f.kcal_100g), protein_100g: Number(f.protein_100g),
-  fat_100g: Number(f.fat_100g), carbs_100g: Number(f.carbs_100g), portions: f.portions ?? [], confidence: f.confidence,
+  id: f.id, name: f.name_ru, brand: f.brand ?? null, category: f.category ?? null, state: f.state, kcal_100g: Number(f.kcal_100g),
+  protein_100g: orNull(f.protein_100g), fat_100g: orNull(f.fat_100g), carbs_100g: orNull(f.carbs_100g), portions: f.portions ?? [], confidence: f.confidence,
   kcal_range_100g: f.kcal_low_100g != null ? [Number(f.kcal_low_100g), Number(f.kcal_high_100g)] : null,
 });
 
@@ -57,20 +36,6 @@ function dayOf(ctx: ToolCtx, date?: string): string {
 
 const METRIC_LABEL = { weight: 'Вес', waist: 'Талия', body_fat: 'Жир' } as const;
 
-/**
- * Links a meal logged from chat photos to its raw inputs: one `recognitions` row per agent
- * run (kind photo), so photo → recognition → meal stays traceable like on the log screen.
- */
-async function photoRecognition(ctx: ToolCtx, items: { name: string; grams: number }[]): Promise<string | null> {
-  if (!ctx.photo?.mediaIds.length) return null;
-  const { data, error } = await ctx.sb.from('recognitions').insert({
-    user_id: ctx.userId, kind: 'photo', media_ids: ctx.photo.mediaIds, pipeline_version: 'chat-agent-v1', prompt_version: 'agent',
-    runs: [{ provider: 'chatgpt', model: ctx.photo.model, run_id: ctx.runId }], result: { items }, status: 'done',
-  }).select('id').single();
-  if (error) return null;
-  return data.id as string;
-}
-
 export function buildTools(ctx: ToolCtx): ToolSet {
   const { sb, userId } = ctx;
 
@@ -79,7 +44,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       description: 'Totals, goal ranges, remaining macros, meals and checklist for a local day. Call before giving any numbers.',
       inputSchema: z.object({ date: dateSchema }),
       execute: async ({ date }) => {
-        const s = await getDaySummary(sb, userId, dayOf(ctx, date), ctx.profile);
+        const s = overlayDay(await getDaySummary(sb, userId, dayOf(ctx, date), ctx.profile), ctx.dry);
         return {
           day: s.day, is_today: s.isToday, training_day: s.trainingDay, challenge_day: s.challengeDay,
           goal: s.goal && {
@@ -88,7 +53,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
             carbs_g: [s.goal.carbs_min_g, s.goal.carbs_max_g], success: s.goal.success_criteria,
           },
           totals: s.totals, remaining: s.remaining, status: s.status,
-          meals: s.meals.map((m) => ({ id: m.id, time: localParts(new Date(m.eaten_at), ctx.profile.timezone).hhmm, title: m.title, slot: m.slot, kcal: m.kcal, protein_g: m.protein_g, items: m.items.map((i) => `${i.name} ${i.grams}г`) })),
+          meals: s.meals.map((m) => ({ id: m.id, time: localParts(new Date(m.eaten_at), ctx.profile.timezone).hhmm, title: m.title, slot: m.slot, kcal: m.kcal, protein_g: m.protein_g, by: m.input_method, items: m.items.map((i) => `${i.name} ${i.grams}г${i.partial ? ' (только ккал)' : ''}`) })),
           checklist: s.checklist.map((c) => ({ key: c.key, label: c.label, done: c.done, value: c.value, due: c.due_time })),
           now_local: localParts(new Date(), ctx.profile.timezone).hhmm,
         };
@@ -110,122 +75,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       execute: async ({ query, limit }) => (await searchFoodsSmart(sb, query, limit ?? 5)).map(compactFood),
     }),
 
-    log_meal: tool({
-      description: 'Log eaten food. Each item: food_id (from search_foods) OR query, plus grams or count. Macros are computed by the database, never by you. Use template_key to log a template.',
-      inputSchema: z.object({
-        items: z.array(z.object({
-          food_id: z.string().uuid().optional(),
-          query: z.string().optional(),
-          grams: z.number().positive().max(5000).optional(),
-          count: z.number().positive().max(50).optional(),
-          state: z.enum(['raw', 'cooked', 'dry', 'as_is']).optional(),
-        })).max(20).optional(),
-        template_key: z.string().optional(),
-        time_local: hhmm.optional().describe('HH:MM local time it was eaten; default now'),
-        date: dateSchema,
-        slot: z.enum(['breakfast', 'lunch', 'dinner', 'snack', 'shake', 'supplement', 'late']).optional(),
-        title: z.string().max(120).optional(),
-        note: z.string().max(300).optional(),
-      }),
-      execute: async (args) => {
-        const day = dayOf(ctx, args.date);
-        const eatenAt = args.time_local ? instantForLocal(day, args.time_local.padStart(5, '0'), ctx.profile.timezone, ctx.profile.day_boundary_minutes) : new Date();
-        const pc = await personalContext(sb, userId);
-        let items: { food_id: string; name: string; grams: number; source: 'agent' | 'template' }[] = [];
-        let checklistKey: string | null = null;
-        let templateId: string | null = null;
-        let slot: string | null = args.slot ?? null;
-        let title = args.title ?? null;
-        if (args.template_key) {
-          const t = (await listTemplates(sb, userId)).find((x) => x.key === args.template_key || x.name === args.template_key);
-          if (!t) return { error: `template not found: ${args.template_key}` };
-          items = t.items.map((i) => ({ food_id: i.food_id, name: i.foods.name_ru, grams: Number(i.grams), source: 'template' as const }));
-          checklistKey = t.checklist_key; templateId = t.id; slot = slot ?? t.slot; title = title ?? t.name;
-        }
-        const unresolved: string[] = [];
-        for (const it of args.items ?? []) {
-          let food: Food | undefined;
-          if (it.food_id) {
-            const { data } = await sb.from('foods').select('*').eq('id', it.food_id).maybeSingle();
-            food = (data as Food) ?? undefined;
-          } else if (it.query) {
-            food = pickBest(await searchFoodsSmart(sb, it.query, 6), it.state, pc.preferred, it.query)?.food;
-          }
-          if (!food) { unresolved.push(it.query ?? it.food_id ?? '?'); continue; }
-          const grams = it.grams ?? (it.count ? (food.portions?.[0]?.g ?? Number(food.default_portion_g ?? 100)) * it.count : Number(food.default_portion_g ?? 100));
-          items.push({ food_id: food.id, name: food.name_ru, grams: r1(grams), source: 'agent' });
-        }
-        if (unresolved.length && !items.length) return { error: 'foods not found', unresolved, hint: 'call search_foods with simpler words or ask the user' };
-        if (!items.length) return { error: 'nothing to log' };
-        if (ctx.dryRun) {
-          const { data: foods } = await sb.from('foods').select('*').in('id', items.map((i) => i.food_id));
-          const byId = new Map((foods ?? []).map((f) => [f.id as string, f as Food]));
-          const t = items.reduce((a, i) => { const f = byId.get(i.food_id)!; const m = macrosFor(i.grams, { kcal: Number(f.kcal_100g), protein: Number(f.protein_100g), fat: Number(f.fat_100g), carbs: Number(f.carbs_100g) }); return { kcal: a.kcal + m.kcal, protein_g: a.protein_g + m.protein_g }; }, { kcal: 0, protein_g: 0 });
-          ctx.ui.loggedMeals.push({ id: 'dry-run', title: title ?? items.map((i) => i.name).join(', '), kcal: Math.round(t.kcal), protein_g: r1(t.protein_g) });
-          return { saved: true, dry_run: true, items, kcal: Math.round(t.kcal), protein_g: r1(t.protein_g), unresolved };
-        }
-        // Honest uncertainty for the reply: kcal range from composite dishes, low-confidence items.
-        const { data: fmeta } = await sb.from('foods').select('id, name_ru, kcal_100g, kcal_low_100g, kcal_high_100g, confidence').in('id', items.map((i) => i.food_id));
-        const fm = new Map((fmeta ?? []).map((f) => [f.id as string, f]));
-        const range = items.reduce((a, i) => {
-          const f = fm.get(i.food_id);
-          const mid = (Number(f?.kcal_100g ?? 0) * i.grams) / 100;
-          return [a[0] + (f?.kcal_low_100g != null ? (Number(f.kcal_low_100g) * i.grams) / 100 : mid), a[1] + (f?.kcal_high_100g != null ? (Number(f.kcal_high_100g) * i.grams) / 100 : mid)];
-        }, [0, 0]);
-        const lowConfidence = items.filter((i) => fm.get(i.food_id)?.confidence === 'low').map((i) => i.name);
-        const fromPhoto = !templateId && Boolean(ctx.photo?.mediaIds.length);
-        const recognitionId = fromPhoto ? await photoRecognition(ctx, items.map((i) => ({ name: i.name, grams: i.grams }))) : null;
-        const saved = await saveMeal(sb, userId, {
-          eaten_at: eatenAt.toISOString(), slot, title: title ?? items.map((i) => i.name).slice(0, 3).join(', '),
-          input_method: templateId ? 'template' : fromPhoto ? 'photo' : 'agent', template_id: templateId, note: args.note ?? null,
-          recognition_id: recognitionId,
-          client_id: `agent:${ctx.runId}:${JSON.stringify(items).length}:${items.map((i) => i.food_id.slice(0, 4) + i.grams).join('')}`.slice(0, 80),
-          items,
-        }, { checklistKey });
-        ctx.ui.loggedMeals.push({ id: saved.id, title: title ?? items[0].name, kcal: Math.round(saved.kcal), protein_g: saved.protein_g });
-        return {
-          saved: true, meal_id: saved.id, day: saved.local_day, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g,
-          kcal_range: range[1] - range[0] > 40 ? [Math.round(range[0]), Math.round(range[1])] : null,
-          low_confidence_items: lowConfidence,
-          note_for_reply: lowConfidence.length ? 'Оценка примерная: назови диапазон ккал и предложи уточнить граммы кнопками.' : null,
-          items: items.map((i) => `${i.name} ${i.grams}г`), checklist_marked: saved.checklist, unresolved,
-        };
-      },
-    }),
-
-    edit_meal: tool({
-      description: 'Edit a logged meal (creates a new version, history kept). Provide full new item list and/or new time.',
-      inputSchema: z.object({
-        meal_id: z.string().uuid(),
-        items: z.array(z.object({ food_id: z.string().uuid(), grams: z.number().positive().max(5000) })).optional(),
-        time_local: hhmm.optional(),
-        slot: z.enum(['breakfast', 'lunch', 'dinner', 'snack', 'shake', 'supplement', 'late']).optional(),
-      }),
-      execute: async ({ meal_id, items, time_local, slot }) => {
-        const { data: m } = await sb.from('meals').select('id, local_day, eaten_at, meal_items(food_id, name, grams, per100)').eq('id', meal_id).eq('user_id', userId).eq('is_current', true).maybeSingle();
-        if (!m) return { error: 'meal not found or not current' };
-        const newItems = items
-          ? await Promise.all(items.map(async (i) => { const { data: f } = await sb.from('foods').select('name_ru').eq('id', i.food_id).single(); return { food_id: i.food_id, name: (f?.name_ru as string) ?? '?', grams: i.grams, source: 'agent' as const, edited: true }; }))
-          : ((m.meal_items ?? []) as { food_id: string | null; name: string; grams: number; per100: { kcal: number; protein: number; fat: number; carbs: number } | null }[]).map((i) => ({ food_id: i.food_id, name: i.name, grams: Number(i.grams), per100: i.per100, source: 'agent' as const }));
-        if (ctx.dryRun) return { saved: true, dry_run: true };
-        const eatenAt = time_local ? instantForLocal(m.local_day as string, time_local.padStart(5, '0'), ctx.profile.timezone, ctx.profile.day_boundary_minutes).toISOString() : (m.eaten_at as string);
-        const saved = await saveMeal(sb, userId, { supersedes_id: meal_id, eaten_at: eatenAt, slot: slot ?? undefined, input_method: 'agent', items: newItems });
-        ctx.ui.actions.push({ kind: 'meal_edit', text: `Приём исправлен · ${Math.round(saved.kcal)} ккал · б ${r1(saved.protein_g)}` });
-        return { saved: true, meal_id: saved.id, kcal: Math.round(saved.kcal), protein_g: saved.protein_g };
-      },
-    }),
-
-    delete_meal: tool({
-      description: 'Request deletion of a meal. Requires the user to confirm with a button; do not claim it is deleted.',
-      inputSchema: z.object({ meal_id: z.string().uuid(), reason: z.string().max(200).optional() }),
-      execute: async ({ meal_id }) => {
-        const { data: m } = await sb.from('meals').select('id, title, kcal').eq('id', meal_id).eq('user_id', userId).eq('is_current', true).maybeSingle();
-        if (!m) return { error: 'meal not found' };
-        const action: PendingAction = { id: crypto.randomUUID(), kind: 'delete_meal', summary: `Удалить «${m.title ?? 'приём'}» (${Math.round(Number(m.kcal))} ккал)?`, params: { meal_id } };
-        ctx.ui.pendingActions.push(action);
-        return { status: 'awaiting_user_confirmation', summary: action.summary };
-      },
-    }),
+    ...mealTools(ctx),
 
     update_checklist: tool({
       description: 'Mark a checklist item (keys: weigh, breakfast, creatine, protein_1, banana_pre, workout, protein_2, lunch, dinner, prep_chicken, tvorog, steps, sleep, close_day). For steps/sleep pass value.',
@@ -295,10 +145,12 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       execute: async ({ title, servings, ingredients, steps, minutes, save }) => {
         const pc = await personalContext(sb, userId);
         const lines = await Promise.all(ingredients.map(async (ing) => {
-          const best = pickBest(await searchFoodsSmart(sb, ing.query, 5), null, pc.preferred, ing.query);
+          // Same relevance gate as log_meal: a weak match is «not found», never a wrong food.
+          const gate = relevanceGate(ing.query, (await searchFoodsSmart(sb, ing.query, 6)).filter((f) => plausible(f, ing.query)));
+          const best = gate.ok ? pickBest(gate.pool, null, pc.preferred, ing.query) : null;
           if (!best) return { query: ing.query, grams: ing.grams, missing: true as const };
           const f = best.food;
-          return { query: ing.query, food: f.name_ru, food_id: f.id, grams: ing.grams, ...macrosFor(ing.grams, { kcal: Number(f.kcal_100g), protein: Number(f.protein_100g), fat: Number(f.fat_100g), carbs: Number(f.carbs_100g) }) };
+          return { query: ing.query, food: f.name_ru, food_id: f.id, grams: ing.grams, ...macrosFor(ing.grams, per100Of(f)) };
         }));
         const found = lines.filter((l): l is Extract<typeof l, { food_id: string }> => 'food_id' in l);
         const total = found.reduce((a, l) => ({ kcal: a.kcal + l.kcal, protein_g: a.protein_g + l.protein_g, fat_g: a.fat_g + l.fat_g, carbs_g: a.carbs_g + l.carbs_g }), { kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0 });
@@ -489,8 +341,4 @@ export function buildTools(ctx: ToolCtx): ToolSet {
       },
     }),
   };
-}
-
-export function emptyUi(): AgentUi {
-  return { proposedMemories: [], pendingActions: [], sentMessages: [], loggedMeals: [], actions: [] };
 }

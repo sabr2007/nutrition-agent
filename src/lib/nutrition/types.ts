@@ -11,20 +11,23 @@ export type Food = {
   category?: string | null;
   state: FoodState;
   kcal_100g: number;
-  protein_100g: number;
-  fat_100g: number;
-  carbs_100g: number;
+  /** null when only calories are known (a food the person named by kcal, D24). */
+  protein_100g: number | null;
+  fat_100g: number | null;
+  carbs_100g: number | null;
   kcal_low_100g?: number | null;
   kcal_high_100g?: number | null;
   raw_food_id?: string | null;
   yield_factor?: number | null;
   default_portion_g?: number | null;
   portions?: { label: string; g: number }[];
-  confidence: 'high' | 'medium' | 'low';
+  aliases?: string[] | null;
+  confidence: 'high' | 'medium' | 'low' | 'user_kcal_only';
   score?: number;
 };
 
-export type Per100 = { kcal: number; protein: number; fat: number; carbs: number };
+/** `partial`: protein/fat/carbs are unknown (counted as 0 and flagged in day totals). */
+export type Per100 = { kcal: number; protein: number; fat: number; carbs: number; partial?: boolean };
 
 export type Macros = { kcal: number; protein_g: number; fat_g: number; carbs_g: number };
 

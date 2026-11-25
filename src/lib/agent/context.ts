@@ -4,7 +4,7 @@ import type { DaySummary } from '@/lib/data/day';
 import type { Profile } from '@/lib/data/profile';
 import { localParts } from '@/lib/nutrition/day';
 
-export const AGENT_PROMPT_VERSION = 'agent-v3';
+export const AGENT_PROMPT_VERSION = 'agent-v4';
 
 type MemoryRow = { id: string; kind: string; content: string; pinned: boolean; importance: number; status: string };
 type SkillRow = { key: string; title: string; description: string; user_id: string | null; version: number };
@@ -51,8 +51,12 @@ function daySnapshot(s: DaySummary): string {
     if (s.goal.success_criteria) lines.push(`- Критерий успеха: ${s.goal.success_criteria}.`);
   }
   lines.push(`- Съедено за день: ${s.totals.kcal} ккал, белок ${s.totals.protein_g} г, жиры ${s.totals.fat_g} г, углеводы ${s.totals.carbs_g} г; приёмов пищи: ${s.totals.meals_count}.`);
+  if (s.totals.macros_incomplete) lines.push(`- БЖУ за день неполные: у ${s.totals.macros_incomplete} продукт(ов) известны только калории (их БЖУ посчитаны как 0).`);
   if (s.remaining) lines.push(`- До нижней границы белка: ${Math.max(0, s.remaining.protein_to_min)} г; до верхней границы калорий: ${s.remaining.kcal_to_max} ккал.`);
-  if (s.meals.length) lines.push(`- Записано: ${s.meals.map((m) => `${localParts(new Date(m.eaten_at), s.profile.timezone).hhmm} ${m.title ?? m.slot ?? 'приём'} (${Math.round(m.kcal)} ккал)`).join('; ')}.`);
+  if (s.meals.length) {
+    lines.push('- Записано сегодня (id — для edit_meal/delete_meal):');
+    for (const m of s.meals) lines.push(`  - ${localParts(new Date(m.eaten_at), s.profile.timezone).hhmm} ${m.title ?? m.slot ?? 'приём'} — ${Math.round(m.kcal)} ккал (${m.items.map((i) => `${i.name} ${Math.round(i.grams)} г`).join(', ')}) · id ${m.id}`);
+  }
   const done = s.checklist.filter((c) => c.done).map((c) => c.label);
   const todo = s.checklist.filter((c) => !c.done).map((c) => (c.due_time ? `${c.label} (${c.due_time})` : c.label));
   lines.push(`- Чек-лист: сделано — ${done.join(', ') || 'ничего'}; не сделано — ${todo.join(', ') || 'всё сделано'}.`);
@@ -71,6 +75,10 @@ export type PromptInput = {
   safety?: { binge: boolean; reason: string | null };
   now?: Date;
   foodReport?: boolean;
+  /** The person asks to fix something already logged. */
+  correction?: boolean;
+  /** The person stated calories themselves («там 170 ккал»). */
+  statedKcal?: boolean;
   /** Number of photos attached to the current message. */
   photos?: number;
 };
@@ -105,6 +113,11 @@ export function buildSystemPrompt(i: PromptInput): string {
 - Если человек сообщает, что что-то съел, — запиши это (log_meal), даже если это срыв. Один вызов log_meal на один приём.
 - «Как обычно / завтрак как всегда» → log_meal с template_key. Задним числом — time_local и date.
 - Сначала записать, потом уточнять: если он сообщил, что съел, или просит записать, — запиши сразу с честной оценкой. Сырой/готовый вес и состав не переспрашивай до записи: log_meal сам возьмёт его обычный вариант продукта (как в шаблонах). Уточнение — после записи, одним вопросом через ask_user с кнопками; edit_meal поправит запись. Если оценка грубая — скажи «примерно», дай диапазон.
+- В log_meal одна позиция = один продукт («гречка с курицей» → гречка + курица). Брендовый или упакованный продукт (Fuse Tea, Coca-Cola, Snickers, «Простоквашино») — передай brand.
+- log_meal вернул needs_food — ничего не записано, и похожий продукт подставлять нельзя. Человек назвал калорийность/БЖУ — save_user_food с его цифрами, потом log_meal с food_id. Цифр нет — спроси кнопками (ask_user: точный вариант из candidates, «Скажу калорийность», «Сфоткаю этикетку»). Общий аналог для бренда — только если он сам выбрал его кнопкой (allow_generic: true). Свои цифры для продукта не придумывай и не вспоминай.
+- Человек назвал калорийность («там 170 ккал», «250 ккал на пачку») — это save_user_food (amount и unit из его слов: 0,5 л → 500 ml), а не поиск похожего продукта.
+- Название приёма (title) не пиши с цифрами и калориями: его собирает код по составу; можно короткое «Обед».
+- «Исправь», «там на самом деле…», «у тебя всё ещё висит…» — правь существующую запись: edit_meal по id из «Сейчас» (новый продукт — сначала save_user_food, потом edit_meal с replace), а не новый log_meal. Свою ошибочную запись за последние 30 минут удаляй delete_meal сразу, без кнопки. После правки называй цифры из ответа edit_meal (in_database_now) — это то, что реально записано, а не то, что ты хотел записать.
 - Для типовых задач есть навыки (ниже): если задача совпадает — сначала load_skill и следуй процедуре.
 - Заметил устойчивый факт (расписание, предпочтение, повторяющийся паттерн) — предложи запомнить через remember_fact (propose=true). Не запоминай разовое.
 - Опасные действия (смена целей, удаление) — только через инструменты с подтверждением кнопкой. Не говори, что уже сделал, пока человек не нажал.
@@ -130,7 +143,9 @@ ${daySnapshot(i.summary)}`;
 
   const skillBlock = (i.activeSkill ? `\n\n## Активный навык: ${i.activeSkill.key} (следуй процедуре)\n${i.activeSkill.body.trim()}` : '')
     + (i.photos ? photoRules(i.photos) : '')
-    + (i.foodReport ? `\n\n## Важно для этого ответа\nЧеловек сообщает о том, что съел, или просит записать. Сначала запиши это одним вызовом log_meal (честная оценка порции; для блюд назови диапазон ккал из ответа инструмента) — без вопросов до записи, потом коротко подтверди цифрами и остатком дня. Советы — только если он просит.` : '')
+    + (i.correction ? `\n\n## Важно для этого ответа\nЧеловек просит исправить уже записанное. Найди этот приём в «Записано сегодня» (обычно последний записанный тобой) и исправь его edit_meal${i.statedKcal ? ' — его цифры сначала сохрани save_user_food, потом edit_meal с replace на этот food_id' : ''}. Новый log_meal не создавай. Если записал лишнее за последние 30 минут — delete_meal (удалится сразу). В ответе назови цифры из in_database_now.` : '')
+    + (!i.correction && i.statedKcal ? `\n\n## Важно для этого ответа\nЧеловек сам назвал калорийность. Сначала save_user_food с его цифрами (amount/unit из сообщения), затем log_meal с этим food_id — без поиска похожего продукта и без вопросов. Потом коротко подтверди и назови остаток дня.` : '')
+    + (!i.correction && !i.statedKcal && i.foodReport ? `\n\n## Важно для этого ответа\nЧеловек сообщает о том, что съел, или просит записать. Сначала запиши это одним вызовом log_meal (честная оценка порции; для блюд назови диапазон ккал из ответа инструмента) — без вопросов до записи, потом коротко подтверди цифрами и остатком дня. Если log_meal вернул needs_food — следуй его hint. Советы — только если он просит.` : '')
     + (i.safety?.binge ? `\n\n## Важно для этого ответа\nЗамечено: ${i.safety.reason}. Сначала, без вопросов про объём, запиши съеденное (log_meal, честная примерная оценка: «полпачки печенья» ≈ 150 г) и срыв (log_slip); уточнить объём можно потом кнопками. В ответе обязательно, бережно и одним предложением предложи поговорить со специалистом (психотерапевт или диетолог, работающий с перееданием/РПП) — без диагнозов, без давления, без стыда. Не обсуждай компенсации.` : '');
   if (i.mode === 'chat') {
     return `${base}${skillBlock}`;

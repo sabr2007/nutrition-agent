@@ -10,7 +10,8 @@ import { localParts } from '@/lib/nutrition/day';
 import { historyText, toolLabel, type ChatEvent, type ChatPart } from '@/lib/chat/protocol';
 import { buildTools, emptyUi, type AgentUi, type ToolCtx } from './tools';
 import { AGENT_PROMPT_VERSION, buildSystemPrompt, loadMemory, loadSkillsIndex } from './context';
-import { isFoodReport, matchSkill, safetySignals } from './skills-router';
+import { isCorrection, isFoodReport, matchSkill, safetySignals, statesCalories } from './skills-router';
+import { newDryWorld, overlayDay, type DryWorld } from './dry-world';
 
 export type AgentTrigger = ToolCtx['trigger'];
 
@@ -42,6 +43,8 @@ export type AgentOptions = {
   skillKey?: string | null;
   proactive?: { reason: string; ruleKey?: string | null; template?: string | null; sentToday: number; lastSentAt?: string | null };
   dryRun?: boolean;
+  /** Simulated foods/meals of a dry run (evals with a fixture); created when absent. */
+  dryWorld?: DryWorld;
   persist?: boolean;
   history?: ModelMessage[];
   /** Simulated clock (tests/evals of proactive wakes); defaults to now. */
@@ -113,12 +116,12 @@ function writesSummary(ui: AgentUi): string | null {
 
 type Prepared = { profile: Profile; system: string; messages: ModelMessage[]; mode: 'chat' | 'proactive' };
 
-async function prepare(opts: AgentOptions, userText: string, images: AgentImage[], persist: boolean): Promise<Prepared> {
+async function prepare(opts: AgentOptions, userText: string, images: AgentImage[], persist: boolean, dry?: DryWorld): Promise<Prepared> {
   const { sb, userId } = opts;
   const profile = await getProfile(sb, userId);
   const mode = opts.trigger === 'chat' || opts.trigger === 'eval' ? 'chat' : 'proactive';
   const [summary, memory, skills, history] = await Promise.all([
-    getDaySummary(sb, userId, undefined, profile),
+    getDaySummary(sb, userId, undefined, profile).then((s) => overlayDay(s, dry)),
     loadMemory(sb, userId, userText),
     loadSkillsIndex(sb, userId),
     opts.history ? Promise.resolve(opts.history) : persist ? loadHistory(sb, userId) : Promise.resolve([] as ModelMessage[]),
@@ -137,6 +140,7 @@ async function prepare(opts: AgentOptions, userText: string, images: AgentImage[
   const system = buildSystemPrompt({
     profile, summary, memory, skills, mode, proactive: opts.proactive, activeSkill, safety, now: opts.now,
     foodReport: mode === 'chat' && isFoodReport(userText), photos: images.length,
+    correction: mode === 'chat' && isCorrection(userText), statedKcal: mode === 'chat' && statesCalories(userText),
   });
   const messages: ModelMessage[] = [...history];
   if (userText || images.length) messages.push({ role: 'user', content: userContent(userText, images) } as ModelMessage);
@@ -197,11 +201,12 @@ export async function runAgent(opts: AgentOptions): Promise<AgentResult> {
     });
   }
 
-  const { profile, system, messages, mode } = await prepare(opts, userText, images, persist);
+  const dry = opts.dryRun ? (opts.dryWorld ?? newDryWorld()) : undefined;
+  const { profile, system, messages, mode } = await prepare(opts, userText, images, persist, dry);
   const ui = emptyUi();
   let trace: TraceCall[] = [];
   const toolCtx: ToolCtx = {
-    sb, userId, profile, runId, trigger: opts.trigger, ui, dryRun: opts.dryRun,
+    sb, userId, profile, runId, trigger: opts.trigger, ui, dryRun: opts.dryRun, dry,
     photo: images.length ? { mediaIds: images.map((i) => i.mediaId), model: spec.model } : undefined,
   };
   const purpose = mode === 'chat' ? (opts.deep ? 'agent_chat_deep' : 'agent_chat') : 'agent_proactive';

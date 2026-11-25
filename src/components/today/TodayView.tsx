@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import useSWR from 'swr';
 import { api, fetcher, newClientId, postOrQueue } from '@/lib/client/api';
 import type { TodayResponse, TemplateLite } from '@/lib/client/types';
@@ -94,6 +94,9 @@ export function TodayView() {
             <MacroRow name="жиры" unit="г" value={s.totals.fat_g} min={g?.fat_min_g ?? 0} max={g?.fat_max_g ?? null} color="var(--fat)" />
              <MacroRow name="углев" unit="г" value={s.totals.carbs_g} min={g?.carbs_min_g ?? 0} max={g?.carbs_max_g ?? null} color="var(--carbs)" />
           </div>
+          {s.totals.macros_incomplete > 0 && (
+            <p className="font-mono text-[11px] text-ink-3">* БЖУ неполные: у {s.totals.macros_incomplete} поз. известны только ккал</p>
+          )}
         </div>
         {s.remaining && (
           <p className="relative mt-4 border-t border-dashed border-rule pt-3 text-sm text-ink-2">

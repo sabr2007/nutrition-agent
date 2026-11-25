@@ -37,3 +37,17 @@ export function isFoodReport(text: string | undefined | null): boolean {
   if (!text || /\?\s*$/.test(text.trim())) return false;
   return FOOD_REPORT.test(text) || (LOG_REQUEST.test(text) && AMOUNT.test(text));
 }
+
+// «исправь», «там на самом деле 250», «у тебя всё ещё висит 5 ккал»: fix the existing meal, never log a new one.
+const CORRECTION = /(исправ|поправ|переправ|не то(?![а-яё])|не тот|не так записал|висит|ошибочн|неправильн|замени|удали (это|лишн|последн|ошибк)|на самом деле)/i;
+
+export function isCorrection(text: string | undefined | null): boolean {
+  return Boolean(text && CORRECTION.test(text));
+}
+
+// «там 170 ккал», «250 калорий на пачку»: the person's own numbers → save_user_food.
+const STATED_KCAL = /\d+([.,]\d+)?\s*(ккал|кал(?![а-яё])|калори|kcal)/i;
+
+export function statesCalories(text: string | undefined | null): boolean {
+  return Boolean(text && STATED_KCAL.test(text));
+}

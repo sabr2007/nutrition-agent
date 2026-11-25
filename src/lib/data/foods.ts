@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { Food } from '@/lib/nutrition/types';
+import { cleanFoodName, foodKey, sameNumbers, userFoodNumbers, type UserFoodInput, type UserFoodNumbers } from '@/lib/nutrition/user-food';
 
 const MACRO_SUM_LIMIT = 100.5;
 const KCAL_TOLERANCE = 0.6;
@@ -23,7 +24,7 @@ export const PersonalFoodSchema = z.object({
 });
 export type PersonalFoodInput = z.infer<typeof PersonalFoodSchema>;
 
-const same = (a: number, b: number, tol: number) => Math.abs(Number(a) - Number(b)) <= tol;
+const same = (a: number | null, b: number, tol: number) => a != null && Math.abs(Number(a) - Number(b)) <= tol;
 
 /**
  * Creates a personal food (label photo, typed label, the agent reading a label in the chat);
@@ -62,4 +63,65 @@ export async function createPersonalFood(sb: SupabaseClient, userId: string, b: 
   }
   if (error || !data) throw new Error('Не удалось сохранить продукт');
   return { food: data as Food, created: true };
+}
+
+export type UserFoodOrigin = 'user' | 'label' | 'web';
+
+export type SavedUserFood = { food: Food; created: boolean; replacedIds: string[]; numbers: UserFoodNumbers };
+
+const ORIGIN_NOTE: Record<UserFoodOrigin, string> = {
+  user: 'Со слов пользователя',
+  label: 'С этикетки',
+  web: 'Из интернета',
+};
+
+/** The row a personal food from stated numbers becomes (pure, shared with dry runs). */
+export function userFoodRow(userId: string, input: UserFoodInput & { origin: UserFoodOrigin; source_ref?: string | null; category?: string | null }, numbers: UserFoodNumbers) {
+  return {
+    user_id: userId, source: input.origin, source_ref: input.source_ref ?? null,
+    name_ru: cleanFoodName(input.name) || input.name.trim(), brand: input.brand?.trim() || null,
+    category: input.category ?? (input.unit === 'ml' ? 'drinks' : null), state: 'as_is' as const,
+    kcal_100g: numbers.per100.kcal, protein_100g: numbers.per100.protein, fat_100g: numbers.per100.fat, carbs_100g: numbers.per100.carbs,
+    default_portion_g: numbers.portion.g, portions: [numbers.portion], confidence: numbers.confidence,
+    notes: `${ORIGIN_NOTE[input.origin]}: ${numbers.note}`,
+  };
+}
+
+/**
+ * Saves a food from numbers the person stated (save_user_food, D24). One active row per
+ * name + brand: the same numbers reuse it, different numbers archive the old row (history
+ * stays) and add the new one, so later logs use what the person said last.
+ */
+export async function saveUserFood(
+  sb: SupabaseClient, userId: string,
+  input: UserFoodInput & { origin: UserFoodOrigin; source_ref?: string | null; category?: string | null },
+  opts: { allowMismatch?: boolean } = {},
+): Promise<SavedUserFood> {
+  const numbers = userFoodNumbers(input, opts);
+  const row = userFoodRow(userId, input, numbers);
+  const key = foodKey(row.name_ru, row.brand);
+  const exactName = row.name_ru.replace(/[\\%_]/g, (m) => `\\${m}`);
+  const { data: mine, error: readErr } = await sb.from('foods').select('*').eq('user_id', userId).is('archived_at', null)
+    .in('source', ['user', 'web', 'label']).ilike('name_ru', exactName);
+  if (readErr) throw new Error(`foods: ${readErr.message}`);
+  const same = ((mine ?? []) as Food[]).filter((f) => foodKey(f.name_ru, f.brand) === key);
+  const identical = same.find((f) => sameNumbers(
+    { kcal: Number(f.kcal_100g), protein: f.protein_100g == null ? null : Number(f.protein_100g), fat: f.fat_100g == null ? null : Number(f.fat_100g), carbs: f.carbs_100g == null ? null : Number(f.carbs_100g) },
+    numbers.per100,
+  ));
+  if (identical) return { food: identical, created: false, replacedIds: [], numbers };
+  const replacedIds = same.map((f) => f.id);
+  if (replacedIds.length) {
+    const { error } = await sb.from('foods').update({ archived_at: new Date().toISOString() }).in('id', replacedIds).eq('user_id', userId);
+    if (error) throw new Error(`foods archive: ${error.message}`);
+  }
+  const { data, error } = await sb.from('foods').insert(row).select('*').single();
+  if (error?.code === '23505') {
+    // A parallel save of the same name + brand won the race: use its row.
+    const { data: winner } = await sb.from('foods').select('*').eq('user_id', userId).is('archived_at', null).ilike('name_ru', exactName);
+    const found = ((winner ?? []) as Food[]).find((f) => foodKey(f.name_ru, f.brand) === key);
+    if (found) return { food: found, created: false, replacedIds, numbers };
+  }
+  if (error || !data) throw new Error(`foods insert: ${error?.code ?? 'no row'}`);
+  return { food: data as Food, created: true, replacedIds, numbers };
 }
