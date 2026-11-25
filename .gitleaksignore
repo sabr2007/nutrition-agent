@@ -1,0 +1,4 @@
+# Reviewed false positives: reminder rule keys ("key": "protein_gap_21") in the public seed example.
+99a9fa088d6a997344856f96ed5b15c07332e9c7:scripts/personal-seed.example.json:generic-api-key:123
+ce3c6b9a0ac4acb1935f76b2d66723ae6b5a8e59:scripts/personal-seed.example.json:generic-api-key:123
+scripts/personal-seed.example.json:generic-api-key:112

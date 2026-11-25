@@ -1,47 +1,60 @@
-# Архитектура «Рядом» (v1)
+# Архитектура «Рядом» (v2: Telegram)
 
-Личный AI-агент по питанию: PWA на iPhone, агент с памятью, инструментами и проактивностью.
-Схема данных мультипользовательская с первого дня (RLS на всех таблицах), продукт — для одного пользователя.
+Личный AI-агент по питанию. Главный интерфейс — Telegram-бот (текст, голос, фото, кнопки); день, тело и настройки — Telegram Mini App; проактивные сообщения — в чат бота. Схема данных мультипользовательская (RLS на всех таблицах), продукт — для одного владельца.
 
 ```
- iPhone (PWA, standalone)                       Vercel (Next.js 16, Fluid Compute, Node)
-┌──────────────────────────┐   HTTPS+JWT   ┌──────────────────────────────────────────────┐
-│ Сегодня · Чат · + ·      │──────────────▶│ /api/today        сводка дня (1 запрос)      │
-│ Тело · Ещё               │               │ /api/meals*       сохранение версий приёма   │
-│ service worker:          │               │ /api/recognize/*  фото / голос / текст        │
-│  · офлайн shell + кэш    │               │ /api/chat         агент, стрим (22 инструмента)│
-│  · IndexedDB outbox      │◀── push ──────│ /api/cron/tick    правила напоминаний + агент │
-│  · Declarative Web Push  │               │ /api/export       ZIP с CSV всех таблиц       │
-└──────────┬───────────────┘               └───────┬───────────────┬──────────────────────┘
-           │ supabase-js (RLS)                     │ service role  │ одна модель на задачу,
-           ▼                                       ▼               ▼  без fallback, лог вызовов
-┌──────────────────────────────────────────────────────┐   ┌─────────────────────────────────┐
-│ Supabase: Postgres 17 + Auth + Storage + pg_cron     │   │ ChatGPT plan (Sign in with      │
-│ · append-only events (триггеры на всех таблицах)     │   │ ChatGPT): всё, кроме голоса     │
-│ · meals/meal_items с версиями (supersedes_id)        │   │ Whisper (Workers AI): только    │
-│ · foods (USDA SR, RU-таблицы, KZ-блюда с диапазонами)│   │ расшифровка голоса              │
-│ · memories / skills (версии) / agent_runs / llm_calls│   └─────────────────────────────────┘
-│ · pg_cron ── pg_net ──▶ /api/cron/tick каждые 5 мин  │
-│ · private bucket `media` (фото, аудио)               │
-└──────────────────────────────────────────────────────┘
+ Telegram (бот + Mini App)                        Vercel fra1 (Next.js 16, Fluid Compute, Node)
+┌──────────────────────────┐ webhook+secret ┌───────────────────────────────────────────────────┐
+│ чат: текст/голос/фото/   │───────────────▶│ /api/telegram/webhook  проверка, tg_updates, 200   │
+│ альбом, кнопки, команды  │◀── Bot API ────│   after(): очередь на чат (аренда) → runTurn      │
+│                          │  sendMessage,  │   → runAgent (тот же агент, сессия владельца, RLS)│
+│ Mini App (WebApp SDK):   │  Draft, кнопки │ /api/telegram/auth     initData (HMAC) → сессия    │
+│ Сегодня · Тело · Ещё     │──HTTPS+JWT────▶│ /api/today, /api/meals* журнал дня, версии         │
+└──────────────────────────┘                │ /api/cron/tick         правила → Telegram ✓/⏰/🔕   │
+          Google Health ◀── OAuth (внешний │   + страховка очереди бота + синк браслета        │
+          браузер), опрос раз в 15 мин ────│ /api/health/google/*   OAuth, статус, синк         │
+                                            └──────┬──────────────────────┬─────────────────────┘
+                                                   │ user JWT (RLS) /     │ план ChatGPT: gpt-6.1-sol
+                                                   │ service role         │ (+ web_search), terra (фото);
+                                                   ▼                      ▼ Whisper (голос); OFF (продукты)
+┌──────────────────────────────────────────────────────────────┐
+│ Supabase (Франкфурт): Postgres 17 + Auth + Storage + pg_cron │
+│ · append-only events · приёмы с версиями · foods (+web/OFF)  │
+│ · tg_updates / tg_chats / tg_callbacks / tg_pairings         │
+│ · health_daily / health_sleep / workouts · notifications     │
+│ · memories / skills (версии) / agent_runs / llm_calls        │
+│ · pg_cron ── pg_net ──▶ /api/cron/tick каждые 5 мин          │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+## Ход в Telegram (D25)
+1. Вебхук проверяет `X-Telegram-Bot-Api-Secret-Token`, пишет апдейт в `tg_updates` (уникальный `update_id` → дубль Telegram ничего не делает), отвечает 200 и уходит в `after()`. Чужой `user_id` — одна строка `foreign/ignored` без содержимого и отказ раз в минуту, без модели.
+2. Обработчик берёт аренду чата (одна обработка на чат), собирает альбом (`media_group_id`, до 4 фото — один ход), голос → Whisper → текст первой строкой ответа.
+3. Агент — тот же `runAgent`, что в v1, с пользовательской сессией владельца (magic link → `verifyOtp` на сервере), поэтому RLS и `auth.uid()` работают как в приложении. Ответ стримится черновиком (`sendMessageDraft`), финал — Telegram HTML (нарезка по 4096), под ответом — карточка записанного и inline-кнопки (`callback_data` = короткий id, payload в `tg_callbacks`, повторное нажатие ничего не делает).
+4. Упало — `failed`, повтор cron-страховкой (`tg_requeue`), после 3 попыток владельцу короткое сообщение. Кончился лимит ChatGPT — быстрый парсер и шаблоны кнопками, без модели.
+
+## Mini App (D30)
+- Вход: `initData` из `#tgWebAppData` → `POST /api/telegram/auth` (HMAC, ≤ 24 ч, привязанный `telegram_user_id`) → обычная Supabase-сессия владельца в localStorage. Общая оболочка не тянет supabase-js: токен читается и обновляется напрямую под тем же Web Lock (D31).
+- SDK `telegram-web-app.js` — только внутри Telegram: `ready/expand`, цвета, `BackButton`, `HapticFeedback`, safe areas. CSP: `frame-ancestors 'self' https://web.telegram.org`, `script-src` + `https://telegram.org`.
+- «Сегодня» показывает знакомый день из кэша устройства сразу и обновляет его при возврате в приложение; правка граммов и удаление — прямо в журнале.
 
 ## Слои кода
 
 | Слой | Где | Что делает |
 |---|---|---|
 | Данные | `supabase/migrations/*` | схема, RLS, триггеры журнала, сиды продуктов/навыков, `bootstrap_user`, pg_cron |
-| Расчёты | `src/lib/nutrition/*` | детерминированный КБЖУ, сырой↔готовый вес, граница дня (unit-тесты) |
-| Доступ к данным | `src/lib/data/*` | профиль, цель на дату, сводка дня, сохранение приёма (пересчёт на сервере), шаблоны |
-| Распознавание | `src/lib/recognition/*` | промпты (версии), JSON-схема, быстрый парсер, сопоставление с базой (экран «Записать») |
-| LLM | `src/lib/llm/*` | модели по задачам на плане ChatGPT (`models.ts`), один вызов без fallback (`router.ts`), лог вызовов, токены ChatGPT (refresh с lease), Whisper для голоса |
-| Агент | `src/lib/agent/*` | системный промпт (память + навыки + состояние дня + правила для фото), 22 инструмента, цикл со стримом, трейсы, safety-слой, сценарии evals |
-| Чат | `src/lib/chat/protocol.ts`, `src/components/chat/*` | NDJSON-протокол стрима; экран как в ChatGPT: меню «+», вложения, запись голоса, карточки записанного |
-| Напоминания | `src/lib/reminders/*` | DSL условий, факты дня, движок тиков (окна, тихие часы, кулдауны, лимиты агента) |
-| Push | `src/lib/push/send.ts` | web-push (VAPID), Declarative Web Push payload, чистка мёртвых подписок |
-| UI | `src/app/(app)/*`, `src/components/*` | экраны, дизайн-токены, ASCII-примитивы |
-| Офлайн | `public/sw.js`, `src/lib/offline/outbox.ts` | shell-кэш, кэш сводки дня, очередь записей |
-| Eval | `src/lib/agent/scenarios.ts`, `eval/agent-eval.ts`, `/api/providers/chatgpt/check` | сценарии агента (локально или в проде в dry-run), самопроверка плана ChatGPT |
+| Расчёты | `src/lib/nutrition/*` | детерминированный КБЖУ, сырой↔готовый вес, граница дня, проверки жиров, замена в граммах |
+| Доступ к данным | `src/lib/data/*` | профиль, цель на дату, сводка дня, сохранение приёма (пересчёт на сервере), шаблоны, свои продукты |
+| Продукты | `src/lib/recognition/relevance.ts`, `src/lib/foods/*`, `src/lib/agent/product-tools.ts` | гейт релевантности (бренд, вариант, вкус), Open Food Facts, поиск в интернете с проверкой по Атуотеру |
+| Распознавание | `src/lib/recognition/*` | промпты (версии), быстрый парсер, сопоставление с базой |
+| LLM | `src/lib/llm/*` | модели по задачам на плане ChatGPT, один вызов без fallback, лог вызовов, токены ChatGPT (refresh с lease), Whisper, расход плана за неделю |
+| Агент | `src/lib/agent/*` | промпт (память, навыки, снимок дня с активностью, канал), ~25 инструментов, цикл со стримом, трейсы, safety, eval-сценарии с «сухим миром» |
+| Бот | `src/lib/telegram/*` | вебхук, очередь, ход, ответы и кнопки, команды, медиа, стрим, привязка, напоминания с реакциями, офлайн-режим без модели |
+| Браслет | `src/lib/health/*` | OAuth Google, синк (дневные агрегаты, сон, тренировки), активность для агента и правил |
+| Напоминания | `src/lib/reminders/*` | DSL, факты дня (включая «сделано» из событий и активность), лимиты (чистые функции), доставка в Telegram (пуш — запасной канал) |
+| Mini App | `src/app/(app)/*`, `src/components/*`, `src/lib/client/*` | экраны, сессия без supabase-js, кэш дня, мост Telegram SDK, дизайн-токены |
+| Офлайн | `public/sw.js`, `src/app/sw-version.js`, `src/lib/offline/outbox.ts` | оболочка и статика с версией деплоя, кэш сводки дня, очередь записей |
+| Eval | `src/lib/agent/scenarios.ts`, `/api/providers/chatgpt/check`, `/api/cron/tick {preview}` | 21 сценарий агента в проде в dry-run; превью напоминаний на заданное время |
 
 ## Данные и история
 
@@ -67,8 +80,8 @@
 
 - **Цикл**: AI SDK 7 `streamText` + инструменты в `namespace` (требование плана ChatGPT), `stopWhen: isStepCount(8)`. Текст и старт каждого инструмента стримятся в чат (`onChunk` → NDJSON). «Думать дольше» переключает модель на `gpt-6.1-sol` с высоким reasoning effort.
 - **Фото**: картинки текущего сообщения передаются модели как вход, в истории прошлых сообщений остаётся пометка «[фото]». Правила в промпте: еда → `log_meal` (масса по масштабу тарелки, масло отдельной позицией), этикетка → `save_label_food` → `log_meal`, весы с весом тела → `log_body_metric`, «что выбрать?» → не записывать. Приём из фото получает `input_method = 'photo'` и строку в `recognitions` со ссылкой на `media`.
-- **Системный промпт** (Hermes-подход): идентичность и тон → правила → жёсткая безопасность → закреплённая память → паттерны и недавние итоги → релевантная память (FTS по запросу) → индекс навыков → снимок дня (цель, съедено, остаток, чек-лист, челлендж) → активный навык (детерминированный роутинг по намерению) → safety-блок (признаки переедания).
-- **Инструменты** (типизированные, zod): `get_day_summary`, `list_templates`, `search_foods`, `log_meal`, `edit_meal`, `delete_meal`*, `update_checklist`, `log_body_metric`, `log_slip`, `get_trends`, `suggest_meal_for_remaining_macros`, `generate_recipe`, `make_shopping_list`, `schedule_reminder`, `update_goal`*, `remember_fact`, `search_memory`, `get_calendar_context`, `save_label_food`, `load_skill`, `ask_user`, `send_message`. (*) — только через кнопку подтверждения (`/api/agent/confirm`). Каждая запись попадает в обычные таблицы (`meals`, `body_metrics`, `checklist_marks`, `memories`, `notifications`, `foods`…) и видна под ответом карточкой или чипом (`meta.logged_meals`, `meta.actions`), а «Сегодня» обновляется.
+- **Системный промпт** (Hermes-подход): идентичность и тон → правила → жёсткая безопасность → закреплённая память → паттерны и недавние итоги → релевантная память (FTS по запросу) → индекс навыков → снимок дня (цель, съедено, остаток, активность с браслета, челлендж) → активный навык (детерминированный роутинг по намерению) → канал (Telegram) → safety-блок (признаки переедания).
+- **Инструменты** (типизированные, zod): `get_day_summary`, `list_templates`, `search_foods`, `log_meal`, `edit_meal`, `delete_meal` (свою запись ≤ 30 мин — сразу), `save_user_food`, `lookup_product`, `get_activity`, `log_body_metric`, `log_slip`, `get_trends`, `suggest_meal_for_remaining_macros`, `generate_recipe`, `make_shopping_list`, `schedule_reminder`, `update_goal`*, `remember_fact`, `search_memory`, `get_calendar_context`, `save_label_food`, `load_skill`, `ask_user`, `send_message`. (*) — только через кнопку подтверждения (`/api/agent/confirm`). Каждая запись попадает в обычные таблицы (`meals`, `body_metrics`, `memories`, `notifications`, `foods`…) и видна под ответом карточкой или чипом (`meta.logged_meals`, `meta.actions`), а «Сегодня» обновляется.
 - **Память**: `memories` (fact / preference / pattern / routine / episode / day_summary / week_summary), статусы `proposed → active/rejected/archived`, закрепление, версии через `supersedes_id`, FTS (`russian`). Видна и редактируется на экране «Память». Итог дня пишется детерминированно на смене суток.
 - **Навыки**: процедуры в Markdown в таблице `skills` с версиями (`slip_review` уже v2), личные форки перекрывают системные.
 - **Трейсы**: `agent_runs` (триггер, навык, модель, приложенные фото, шаги, вызовы инструментов с превью результатов и ошибками, токены, стоимость по прайсу API, латентность, решение sent/silent) + `llm_calls` на каждый вызов модели, включая неудачные.
@@ -80,17 +93,19 @@
 1. доставляет отложенные уведомления (snooze, `schedule_reminder` агента);
 2. на смене суток пишет итог вчерашнего дня в память (без LLM);
 3. проверяет правила (`reminder_rules`: время + окно, дни, только тренировочные дни, JSON-условие на фактах дня, кулдаун, раз в день) — бесплатный гейт до LLM;
-4. текст: шаблон с подстановкой, либо LLM-формулировка (`compose`), либо полноценный запуск агента в проактивном режиме (`kind='agent'`), который сам решает писать или молчать;
-5. лимиты для сообщений агента: тихие часы, ≤3 в день, пауза ≥2 ч, молчание после 2 сообщений без ответа. Напоминания, которые пользователь сам настроил, этим лимитом не режутся (но уважают тихие часы и пропускаются, если пункт уже сделан).
-Реакции (opened / snoozed / done / dismissed) пишутся в `notifications`.
+4. текст: шаблон с подстановкой, либо LLM-формулировка (`compose`), либо полноценный запуск агента в проактивном режиме (`kind='agent'`), который сам решает писать или молчать (варианты еды — кнопками «Записать»);
+5. лимиты (D29, `src/lib/reminders/limits.ts`): `/mute`, тихие часы и «🔕 Не сегодня» — для всех; для сообщений агента — ≤ `max_proactive_per_day` (6) в день, пауза ≥ 90 мин после любого сообщения бота, молчание после 3 подряд без реакции. Напоминания владельца лимитом не режутся и пропускаются, если дело уже сделано (`done.*` из событий);
+6. доставка — в Telegram с кнопками ✓ Сделал / ⏰ 15 мин / 🔕 Не сегодня (пуш — запасной канал до привязки бота).
+Реакции (done / snoozed / not_today / will_log / not_eaten) пишутся в `notifications`. `POST /api/cron/tick {"preview": true, "at": "HH:MM"}` показывает, что сработало бы, ничего не отправляя.
 
 ## Модели
 
-Один провайдер — план ChatGPT владельца (`src/lib/llm/models.ts`, решение D22): `agent` — `gpt-6-luna`, `deep` («Думать дольше») — `gpt-6.1-sol`, `vision` — `gpt-6.1-terra`, `parse` и `compose` — `gpt-6-luna`. Запросы — Responses API, всегда стрим и `store: false`, без `temperature`/`max_output_tokens`; ручка качества — reasoning effort. `router.ts` делает один вызов: нет токена — `not_connected`, ошибки классифицируются (quota/auth/rate/server/timeout/bad_request) в понятное сообщение для интерфейса, без повторов и запасных моделей. Каждый вызов (успех и провал) — в `llm_calls`. Токен обновляется за 5 минут до истечения под lease-локом; пока другой запрос обновляет, используется ещё живой токен. Голос — единственное исключение: Whisper на Workers AI (`llm/transcribe.ts`).
+Один провайдер — план ChatGPT владельца (`src/lib/llm/models.ts`, решения D22, D26): `agent` — `gpt-6.1-sol` (effort выбирает код: `low` для простой записи еды, `medium` для остального; переключение — `AGENT_MODEL` или `profiles.settings.agent_model`), встроенный `web_search` — для фактов и поиска продуктов, `deep` — `gpt-6.1-sol` с `high`, `vision` — `gpt-6.1-terra`, `parse` и `compose` — `gpt-6-luna`. Запросы — Responses API, всегда стрим и `store: false`, без `temperature`/`max_output_tokens`; ручка качества — reasoning effort. `router.ts` делает один вызов: нет токена — `not_connected`, ошибки классифицируются (quota/auth/rate/server/timeout/bad_request) в понятное сообщение для интерфейса, без повторов и запасных моделей. Каждый вызов (успех и провал) — в `llm_calls`. Токен обновляется за 5 минут до истечения под lease-локом; пока другой запрос обновляет, используется ещё живой токен. Голос — единственное исключение: Whisper на Workers AI (`llm/transcribe.ts`).
 
 ## Безопасность
 
 - RLS на всех пользовательских таблицах (`user_id = auth.uid()`), `anon` без прав, токены провайдеров — только service role, зашифрованы AES-256-GCM.
 - Публичная регистрация выключена, пароль ≥ 12 символов, аккаунт создаётся Admin API.
 - Секреты только в env (Vercel) и Vault (Supabase); в репозитории — `.env.example`. Все личные данные (цифры тела, распорядок, цели, шаблоны, правила напоминаний, стартовая память) — только в `scripts/personal-seed.json` (gitignored); в репозитории — обезличенный пример `scripts/personal-seed.example.json`.
-- CSP, `frame-ancestors 'none'`, HSTS, `nosniff`, Permissions-Policy (камера/микрофон только self). Логи без персональных данных.
+- CSP (`frame-ancestors 'self' https://web.telegram.org` для Mini App), HSTS, `nosniff`, Permissions-Policy (камера/микрофон только self). Логи без персональных данных.
+- Бот: секрет вебхука, только привязанный владелец (одноразовый код, хранится хешем), чужие апдейты без содержимого и без модели. Mini App: `initData` по HMAC токена бота, не старше 24 ч. Токены Google — как токены ChatGPT (AES-256-GCM, refresh под lease).
