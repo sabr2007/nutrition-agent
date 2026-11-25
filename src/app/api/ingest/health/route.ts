@@ -4,11 +4,10 @@ import { rateLimit } from '@/lib/ratelimit';
 import { handler, HttpError, json, readJson } from '@/lib/http';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { getProfile, todayFor } from '@/lib/data/profile';
-import { addDays } from '@/lib/nutrition/day';
 
 // Apple Shortcuts → POST JSON with the per-user token (docs/research/ios-pwa-push.md, Health import).
-// { "steps": 12345, "sleep_hours": 7.2, "date": "2026-11-24" }  — date defaults to the current local day
-// for steps and to the previous night for sleep.
+// { "steps": 12345, "sleep_hours": 7.2, "date": "2026-11-24" }  — date defaults to the current local day;
+// sleep is stored for its wake-up day (the night that ended that morning).
 const Body = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   steps: z.number().int().min(0).max(150_000).optional(),
@@ -28,11 +27,21 @@ export const POST = handler(async (req) => {
   const userId = prof.user_id as string;
   const profile = await getProfile(admin, userId);
   const today = parsed.data.date ?? todayFor(profile);
-  const rows: Record<string, unknown>[] = [];
-  if (parsed.data.steps != null) rows.push({ user_id: userId, local_day: today, item_key: 'steps', done: parsed.data.steps >= 12000, value: parsed.data.steps, source: 'import' });
-  if (parsed.data.sleep_hours != null) rows.push({ user_id: userId, local_day: parsed.data.date ?? addDays(today, -1), item_key: 'sleep', done: parsed.data.sleep_hours >= 7, value: Math.round(parsed.data.sleep_hours * 10) / 10, source: 'import' });
-  if (!rows.length) throw new HttpError(400, 'nothing to import', 'validation');
-  const { error } = await admin.from('checklist_marks').insert(rows);
-  if (error) throw new HttpError(500, 'db error', 'db');
-  return json({ ok: true, imported: rows.map((r) => r.item_key) });
+  // v2 (D28): the backup source next to Google Health — health_daily / health_sleep, source 'shortcuts'.
+  const imported: string[] = [];
+  const now = new Date().toISOString();
+  if (parsed.data.steps != null) {
+    const { error } = await admin.from('health_daily').upsert({ user_id: userId, local_day: today, source: 'shortcuts', steps: parsed.data.steps, synced_at: now }, { onConflict: 'user_id,local_day,source' });
+    if (error) throw new HttpError(500, 'db error', 'db');
+    imported.push('steps');
+  }
+  if (parsed.data.sleep_hours != null) {
+    // Sleep of the night that ended this morning belongs to today (the wake-up day).
+    const night = parsed.data.date ?? today;
+    const { error } = await admin.from('health_sleep').upsert({ user_id: userId, night_of: night, source: 'shortcuts', minutes: Math.round(parsed.data.sleep_hours * 60), synced_at: now }, { onConflict: 'user_id,night_of,source' });
+    if (error) throw new HttpError(500, 'db error', 'db');
+    imported.push('sleep');
+  }
+  if (!imported.length) throw new HttpError(400, 'nothing to import', 'validation');
+  return json({ ok: true, imported });
 });

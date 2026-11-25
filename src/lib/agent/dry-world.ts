@@ -4,6 +4,7 @@
 import type { DayMeal, DaySummary } from '@/lib/data/day';
 import { progressOf, totalsOf } from '@/lib/data/day';
 import type { Food } from '@/lib/nutrition/types';
+import type { DayActivity } from '@/lib/health/activity';
 
 export type DryMealItem = {
   food_id: string | null; name: string; grams: number;
@@ -25,10 +26,11 @@ export type DryEffect =
   | { kind: 'delete'; meal_id: string; root_id: string; immediate: boolean };
 
 /** `replaceDay`: the simulated meals are the whole day (deterministic evals), not added to the real one. */
-export type DryWorld = { foods: Map<string, Food>; meals: Map<string, DryMeal>; effects: DryEffect[]; nudges: { kind: string; meal_id: string }[]; replaceDay?: boolean };
+export type DryWorld = { foods: Map<string, Food>; meals: Map<string, DryMeal>; effects: DryEffect[]; nudges: { kind: string; meal_id: string }[]; replaceDay?: boolean; activity?: DayActivity };
 
-export function newDryWorld(fixture?: { meals?: DryMeal[]; foods?: Food[]; replaceDay?: boolean }): DryWorld {
+export function newDryWorld(fixture?: { meals?: DryMeal[]; foods?: Food[]; replaceDay?: boolean; activity?: DayActivity }): DryWorld {
   return {
+    activity: fixture?.activity,
     replaceDay: fixture?.replaceDay ?? false,
     foods: new Map((fixture?.foods ?? []).map((f) => [f.id, f])),
     meals: new Map((fixture?.meals ?? []).map((m) => [m.id, m])),

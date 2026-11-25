@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DaySummary } from '@/lib/data/day';
 import type { Profile } from '@/lib/data/profile';
 import { localParts } from '@/lib/nutrition/day';
+import { activityLines, type DayActivity } from '@/lib/health/activity';
 
 export const AGENT_PROMPT_VERSION = 'agent-v6';
 
@@ -83,6 +84,8 @@ export type PromptInput = {
   photos?: number;
   /** Where the reply is shown. */
   channel?: 'app' | 'telegram';
+  /** Today's wearable data (Google Health / Shortcuts), if any. */
+  activity?: DayActivity;
 };
 
 function photoRules(n: number): string {
@@ -146,7 +149,7 @@ ${i.skills.map((s) => `- ${s.key} — ${s.description}`).join('\n')}
 ## Сейчас
 - Местное время ${now.hhmm}, ${WEEKDAY[now.isoWeekday]}; учётный день ${i.summary.day}${i.summary.trainingDay ? ', тренировочный (зал ' + i.profile.training.start + '–' + i.profile.training.end + ')' : ', без тренировки'}. День заканчивается в ${String(Math.floor(i.profile.day_boundary_minutes / 60)).padStart(2, '0')}:00 (еда после полуночи — это ещё этот день).
 - Тихие часы: ${i.profile.quiet_start}–${i.profile.quiet_end}.
-${daySnapshot(i.summary)}`;
+${daySnapshot(i.summary)}${(() => { const a = activityLines(i.activity, i.profile.timezone, i.summary.goal?.steps_min ?? null); return a.length ? `\n${a.join('\n')}` : ''; })()}`;
 
   const skillBlock = (i.activeSkill ? `\n\n## Активный навык: ${i.activeSkill.key} (следуй процедуре)\n${i.activeSkill.body.trim()}` : '')
     + (i.photos ? photoRules(i.photos) : '')

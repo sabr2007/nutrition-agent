@@ -16,6 +16,9 @@ import type { PendingAction, ToolCtx } from './tool-ctx';
 import { dateSchema, hhmm, mealTools } from './meal-tools';
 import { productTools } from './product-tools';
 import { overlayDay } from './dry-world';
+import { getActivity } from '@/lib/health/activity';
+import { syncGoogleHealth, SYNC_EVERY_MS } from '@/lib/health/sync';
+import { supabaseAdmin } from '@/lib/supabase/server';
 import { suggestForRemaining } from './suggest';
 import { buildShoppingList } from './shopping';
 import { getTrends } from './trends';
@@ -122,6 +125,28 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         if (error) return { error: error.message };
         ctx.ui.actions.push({ kind: 'slip', text: 'Срыв записан — это данные, не провал' });
         return { ok: true, slip_id: data.id };
+      },
+    }),
+
+    get_activity: tool({
+      description: 'Wearable activity (Google Health; Apple Shortcuts import as a fallback): steps, active and total kcal, resting heart rate, sleep (duration, bedtime, wake-up, stages) and workouts, for a day or a range (max 14 days). Today is refreshed if the data is older than 15 minutes.',
+      inputSchema: z.object({ date: dateSchema, date_from: dateSchema, date_to: dateSchema }),
+      execute: async ({ date, date_from, date_to }) => {
+        const today = todayFor(ctx.profile);
+        const to = date_to ?? date ?? today;
+        const from = date_from ?? date ?? to;
+        if (from > to || addDays(from, 13) < to) return { error: 'range must be 1–14 days, from ≤ to' };
+        let synced: string | null = null;
+        if (to >= today && !ctx.dryRun) {
+          const { data: conn } = await supabaseAdmin().from('provider_connections').select('status, meta').eq('user_id', userId).eq('provider', 'google_health').maybeSingle();
+          const last = conn?.meta?.last_sync_at ? Date.parse(String(conn.meta.last_sync_at)) : 0;
+          if (conn?.status === 'connected' && Date.now() - last > SYNC_EVERY_MS) {
+            const r = await syncGoogleHealth(supabaseAdmin(), userId, ctx.profile).catch(() => null);
+            synced = r?.ok ? 'just now' : `failed: ${r?.error ?? 'error'}`;
+          }
+          if (!conn || conn.status !== 'connected') synced = 'google health is not connected';
+        }
+        return { days: await getActivity(sb, userId, from, to), sync: synced };
       },
     }),
 

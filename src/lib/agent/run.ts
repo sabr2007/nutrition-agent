@@ -13,6 +13,8 @@ import { buildTools, emptyUi, type AgentUi, type ToolCtx } from './tools';
 import { AGENT_PROMPT_VERSION, buildSystemPrompt, loadMemory, loadSkillsIndex } from './context';
 import { isCorrection, isFoodReport, matchSkill, safetySignals, statesCalories } from './skills-router';
 import { newDryWorld, overlayDay, type DryWorld } from './dry-world';
+import { getActivity } from '@/lib/health/activity';
+import { todayFor } from '@/lib/data/profile';
 
 export type AgentTrigger = ToolCtx['trigger'];
 
@@ -134,11 +136,13 @@ async function prepare(opts: AgentOptions, userText: string, images: AgentImage[
   const { sb, userId } = opts;
   const profile = await getProfile(sb, userId);
   const mode = opts.trigger === 'chat' || opts.trigger === 'eval' ? 'chat' : 'proactive';
-  const [summary, memory, skills, history] = await Promise.all([
+  const today = todayFor(profile);
+  const [summary, memory, skills, history, activity] = await Promise.all([
     getDaySummary(sb, userId, undefined, profile).then((s) => overlayDay(s, dry)),
     loadMemory(sb, userId, userText),
     loadSkillsIndex(sb, userId),
     opts.history ? Promise.resolve(opts.history) : persist ? loadHistory(sb, userId) : Promise.resolve([] as ModelMessage[]),
+    dry?.activity ? Promise.resolve(dry.activity) : getActivity(sb, userId, today, today).then((a) => a[0]).catch(() => undefined),
   ]);
   // Pre-load the procedure for obvious intents (or an explicitly requested skill).
   const activeSkillKey = opts.skillKey ?? (mode === 'chat' ? matchSkill(userText) : 'proactive_checkin');
@@ -155,7 +159,7 @@ async function prepare(opts: AgentOptions, userText: string, images: AgentImage[
     profile, summary, memory, skills, mode, proactive: opts.proactive, activeSkill, safety, now: opts.now,
     foodReport: mode === 'chat' && isFoodReport(userText), photos: images.length,
     correction: mode === 'chat' && isCorrection(userText), statedKcal: mode === 'chat' && statesCalories(userText),
-    channel: opts.channel ?? 'app',
+    channel: opts.channel ?? 'app', activity,
   });
   const messages: ModelMessage[] = [...history];
   if (userText || images.length) messages.push({ role: 'user', content: userContent(userText, images) } as ModelMessage);

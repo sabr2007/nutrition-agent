@@ -4,6 +4,8 @@ import { isCronRequest } from '@/lib/cron-auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { runTick } from '@/lib/reminders/engine';
 import { retryTelegram } from '@/lib/telegram/deps';
+import { staleConnections, syncGoogleHealth } from '@/lib/health/sync';
+import { getProfile } from '@/lib/data/profile';
 
 export const maxDuration = 300;
 
@@ -17,6 +19,13 @@ async function tick(req: Request): Promise<Response> {
       await retryTelegram();
     } catch (e) {
       console.error('[cron] telegram retry failed', (e as Error).message?.slice(0, 200));
+    }
+    // Google Health: poll connected owners whose data is older than 15 minutes.
+    try {
+      const admin = supabaseAdmin();
+      for (const userId of await staleConnections(admin)) await syncGoogleHealth(admin, userId, await getProfile(admin, userId));
+    } catch (e) {
+      console.error('[cron] health sync failed', (e as Error).message?.slice(0, 200));
     }
   });
   const reports = await runTick(supabaseAdmin());
