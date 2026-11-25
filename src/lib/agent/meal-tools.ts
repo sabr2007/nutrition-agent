@@ -209,11 +209,11 @@ export function mealTools(ctx: ToolCtx): ToolSet {
         const day = dayOf(args.date);
         const eatenAt = args.time_local ? instantForLocal(day, args.time_local.padStart(5, '0'), ctx.profile.timezone, ctx.profile.day_boundary_minutes) : new Date();
         const resolved: Resolved[] = [];
-        let template: { id: string; name: string; slot: string; checklist_key: string | null } | null = null;
+        let template: { id: string; name: string; slot: string } | null = null;
         if (args.template_key) {
           const t = (await listTemplates(sb, userId)).find((x) => x.key === args.template_key || x.name === args.template_key);
           if (!t) return { error: `template not found: ${args.template_key}` };
-          template = { id: t.id, name: t.name, slot: t.slot, checklist_key: t.checklist_key };
+          template = { id: t.id, name: t.name, slot: t.slot };
           resolved.push(...t.items.map((i) => ({ food: i.foods, grams: Number(i.grams), fromTemplate: true })));
         }
         const pc = args.items?.some((i) => i.query) ? await personalContext(sb, userId) : null;
@@ -257,7 +257,7 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           recognition_id: recognitionId,
           client_id: `agent:${ctx.runId}:${JSON.stringify(items).length}:${items.map((i) => i.food_id.slice(0, 4) + i.grams).join('')}`.slice(0, 80),
           items,
-        }, { checklistKey: template?.checklist_key ?? null });
+        });
         ctx.ui.loggedMeals.push({ id: saved.id, title, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g });
         const fat = await fatWarningFor(ctx, {
           id: saved.id, day: saved.local_day, fat_g: saved.fat_g,
@@ -271,7 +271,7 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           macros_incomplete: partial,
           note_for_reply: lowConfidence.length ? 'Оценка примерная: назови диапазон ккал и предложи уточнить граммы кнопками.'
             : partial.length ? `У «${partial.join('», «')}» известны только калории: БЖУ не учтены, скажи об этом.` : null,
-          items: resolved.map((r) => `${r.food.name_ru} ${r1(r.grams)}г`), checklist_marked: saved.checklist,
+          items: resolved.map((r) => `${r.food.name_ru} ${r1(r.grams)}г`),
         };
       },
     }),

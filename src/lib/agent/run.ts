@@ -69,7 +69,7 @@ const RUN_TIMEOUT_MS = 90_000;
 const DEEP_TIMEOUT_MS = 240_000;
 const PREVIEW_CHARS = 600;
 const SLIP_WINDOW_MS = 14 * 86_400_000;
-const NAMESPACE = { name: 'ryadom', description: 'Nutrition coach tools: food log, body metrics, checklist, memory, plans' };
+const NAMESPACE = { name: 'ryadom', description: 'Nutrition coach tools: food log, body metrics, activity, memory, plans' };
 
 async function loadHistory(sb: SupabaseClient, userId: string): Promise<ModelMessage[]> {
   const { data } = await sb.from('agent_messages').select('role, text, kind, parts, created_at').eq('user_id', userId).eq('thread', 'main')

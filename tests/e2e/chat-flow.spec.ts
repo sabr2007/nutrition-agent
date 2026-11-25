@@ -23,7 +23,7 @@ test('photo + caption → thumbnail with ×, streamed reply, meal card in the da
   const agent = await fakeAgent(page, () => ({
     events: [{ t: 'tool', name: 'log_meal', label: 'Записываю приём' }, { t: 'text', d: 'Записал обед: ' }, { t: 'text', d: '**каша** ~350 ккал.' }],
     text: 'Записал обед: **каша** ~350 ккал.',
-    meta: { logged_meals: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Каша овсяная', kcal: 350, protein_g: 12 }], actions: [{ kind: 'checklist', text: '✓ Обед' }] },
+    meta: { logged_meals: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Каша овсяная', kcal: 350, protein_g: 12 }], actions: [{ kind: 'body', text: 'Вес 97,4 кг' }] },
   }));
   await login(page);
   await page.goto('/chat');
@@ -47,7 +47,7 @@ test('photo + caption → thumbnail with ×, streamed reply, meal card in the da
   await expect(page.getByText('это мой обед')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Фото' })).toBeVisible();
   await expect(page.getByText('Каша овсяная')).toBeVisible();
-  await expect(page.getByText('✓ Обед')).toBeVisible();
+  await expect(page.getByText('Вес 97,4 кг')).toBeVisible();
   expect(agent.requests[0].media_ids).toHaveLength(1);
   expect(agent.requests[0].text).toBe('это мой обед');
 });

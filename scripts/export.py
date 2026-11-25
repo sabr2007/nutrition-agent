@@ -20,11 +20,11 @@ import psycopg
 
 TABLES = [
     "profiles", "goals", "foods", "meal_templates", "meal_template_items", "media", "recognitions",
-    "meals", "meal_items", "meal_corrections", "checklist_items", "checklist_marks", "body_metrics",
+    "meals", "meal_items", "meal_corrections", "archive_checklist_items", "archive_checklist_marks", "body_metrics",
     "workouts", "slips", "memories", "skills", "reminder_rules", "notifications", "agent_messages",
     "agent_runs", "llm_calls", "recipes", "shopping_lists", "events",
 ]
-VIEWS = ["day_totals", "weight_daily", "checklist_state"]
+VIEWS = ["day_totals", "weight_daily", "archive_checklist_state"]
 DROP = {"embedding", "tsv", "search_text", "access_token_enc", "refresh_token_enc"}
 
 

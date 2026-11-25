@@ -58,9 +58,6 @@ function daySnapshot(s: DaySummary): string {
     lines.push('- Записано сегодня (id — для edit_meal/delete_meal):');
     for (const m of s.meals) lines.push(`  - ${localParts(new Date(m.eaten_at), s.profile.timezone).hhmm} ${m.title ?? m.slot ?? 'приём'} — ${Math.round(m.kcal)} ккал (${m.items.map((i) => `${i.name} ${Math.round(i.grams)} г`).join(', ')}) · id ${m.id}`);
   }
-  const done = s.checklist.filter((c) => c.done).map((c) => c.label);
-  const todo = s.checklist.filter((c) => !c.done).map((c) => (c.due_time ? `${c.label} (${c.due_time})` : c.label));
-  lines.push(`- Чек-лист: сделано — ${done.join(', ') || 'ничего'}; не сделано — ${todo.join(', ') || 'всё сделано'}.`);
   if (s.challengeDay) lines.push(`- Челлендж: день ${s.challengeDay.n} из ${s.challengeDay.of}.`);
   return lines.join('\n');
 }

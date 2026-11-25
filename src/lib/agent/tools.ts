@@ -2,7 +2,7 @@ import 'server-only';
 import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { getDaySummary } from '@/lib/data/day';
-import { listTemplates, markChecklist } from '@/lib/data/meals';
+import { listTemplates } from '@/lib/data/meals';
 import { getProfile, todayFor, isTrainingDay, goalForDay } from '@/lib/data/profile';
 import { addDays, instantForLocal, localParts, isoWeekdayOf } from '@/lib/nutrition/day';
 import { macrosFor, per100Of, r1 } from '@/lib/nutrition/calc';
@@ -45,7 +45,7 @@ export function buildTools(ctx: ToolCtx): ToolSet {
 
   return {
     get_day_summary: tool({
-      description: 'Totals, goal ranges, remaining macros, meals and checklist for a local day. Call before giving any numbers.',
+      description: 'Totals, goal ranges, remaining macros and meals for a local day. Call before giving any numbers.',
       inputSchema: z.object({ date: dateSchema }),
       execute: async ({ date }) => {
         const s = overlayDay(await getDaySummary(sb, userId, dayOf(ctx, date), ctx.profile), ctx.dry);
@@ -58,7 +58,6 @@ export function buildTools(ctx: ToolCtx): ToolSet {
           },
           totals: s.totals, remaining: s.remaining, status: s.status,
           meals: s.meals.map((m) => ({ id: m.id, time: localParts(new Date(m.eaten_at), ctx.profile.timezone).hhmm, title: m.title, slot: m.slot, kcal: m.kcal, protein_g: m.protein_g, by: m.input_method, items: m.items.map((i) => `${i.name} ${i.grams}г${i.partial ? ' (только ккал)' : ''}`) })),
-          checklist: s.checklist.map((c) => ({ key: c.key, label: c.label, done: c.done, value: c.value, due: c.due_time })),
           now_local: localParts(ctx.now ?? new Date(), ctx.profile.timezone).hhmm,
         };
       },
@@ -82,19 +81,6 @@ export function buildTools(ctx: ToolCtx): ToolSet {
     ...mealTools(ctx),
     ...productTools(ctx),
 
-    update_checklist: tool({
-      description: 'Mark a checklist item (keys: weigh, breakfast, creatine, protein_1, banana_pre, workout, protein_2, lunch, dinner, prep_chicken, tvorog, steps, sleep, close_day). For steps/sleep pass value.',
-      inputSchema: z.object({ key: z.string(), done: z.boolean().default(true), value: z.number().optional(), date: dateSchema }),
-      execute: async ({ key, done, value, date }) => {
-        if (ctx.dryRun) return { ok: true, dry_run: true };
-        await markChecklist(sb, userId, dayOf(ctx, date), key, done, 'agent', value ?? null);
-        const { data: item } = await sb.from('checklist_items').select('label').eq('user_id', userId).eq('key', key).maybeSingle();
-        const label = (item?.label as string | undefined) ?? key;
-        ctx.ui.actions.push({ kind: 'checklist', text: `${done ? '✓' : '○'} ${label}${value != null ? ` · ${value}` : ''}` });
-        return { ok: true, key, done, value: value ?? null };
-      },
-    }),
-
     log_body_metric: tool({
       description: 'Log weight (kg), waist (cm) or body fat (%).',
       inputSchema: z.object({ kind: z.enum(['weight', 'waist', 'body_fat']), value: z.number().positive().max(400), fasted: z.boolean().optional(), date: dateSchema }),
@@ -105,7 +91,6 @@ export function buildTools(ctx: ToolCtx): ToolSet {
         const measuredAt = date ? instantForLocal(date, ctx.profile.quiet_end, ctx.profile.timezone, ctx.profile.day_boundary_minutes).toISOString() : new Date().toISOString();
         const { error } = await sb.from('body_metrics').insert({ user_id: userId, kind, value, unit, fasted: fasted ?? null, measured_at: measuredAt });
         if (error) return { error: error.message };
-        if (kind === 'weight') await markChecklist(sb, userId, dayOf(ctx, date), 'weigh', true, 'agent');
         ctx.ui.actions.push({ kind: 'body', text: `${METRIC_LABEL[kind]} ${value} ${unit === '%' ? '%' : unit === 'kg' ? 'кг' : 'см'}${date ? ` · ${date}` : ''}` });
         return { ok: true, kind, value, unit };
       },

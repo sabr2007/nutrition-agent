@@ -13,11 +13,6 @@ export type DayMeal = {
   items: { id: string; food_id: string | null; name: string; grams: number; kcal: number; protein_g: number; fat_g: number; carbs_g: number; confidence: number | null; source: string; partial: boolean }[];
 };
 
-export type ChecklistRow = {
-  key: string; label: string; kind: 'bool' | 'number'; unit: string | null; target: number | null;
-  due_time: string | null; training_day_only: boolean; done: boolean; value: number | null; source: string | null;
-};
-
 export type DaySummary = {
   day: string;
   isToday: boolean;
@@ -28,7 +23,6 @@ export type DaySummary = {
   remaining: { kcal_to_min: number; kcal_to_max: number; protein_to_min: number; fat_to_min: number } | null;
   status: { kcal: 'under' | 'in' | 'over'; protein: 'under' | 'in' | 'over'; belowFloor: boolean } | null;
   meals: DayMeal[];
-  checklist: ChecklistRow[];
   challengeDay: { n: number; of: number } | null;
   profile: Pick<Profile, 'timezone' | 'day_boundary_minutes' | 'training' | 'display_name'>;
 };
@@ -68,12 +62,10 @@ export async function getDaySummary(sb: SupabaseClient, userId: string, day?: st
   const profile = profileIn ?? (await getProfile(sb, userId));
   const today = todayFor(profile);
   const d = day ?? today;
-  const [goal, mealsRes, itemsRes, marksRes] = await Promise.all([
+  const [goal, mealsRes] = await Promise.all([
     goalForDay(sb, userId, d),
     sb.from('meals').select('id, root_id, eaten_at, logged_at, slot, title, input_method, template_id, confidence, kcal, protein_g, fat_g, carbs_g, satfat_g, note, is_labeled, meal_items(id, food_id, name, grams, kcal, protein_g, fat_g, carbs_g, confidence, source, sort_order, per100)')
       .eq('user_id', userId).eq('local_day', d).eq('is_current', true).eq('status', 'confirmed').order('eaten_at'),
-    sb.from('checklist_items').select('key, label, kind, unit, target, due_time, training_day_only, sort_order').eq('user_id', userId).eq('active', true).order('sort_order'),
-    sb.from('checklist_state').select('item_key, done, value, source').eq('user_id', userId).eq('local_day', d),
   ]);
   if (mealsRes.error) throw new Error(`meals: ${mealsRes.error.message}`);
   const meals: DayMeal[] = (mealsRes.data ?? []).map((m) => ({
@@ -89,18 +81,6 @@ export async function getDaySummary(sb: SupabaseClient, userId: string, day?: st
   }));
   const t = totalsOf(meals);
   const trainingDay = isTrainingDay(profile, d);
-  const marks = new Map((marksRes.data ?? []).map((m) => [m.item_key as string, m]));
-  const checklist: ChecklistRow[] = (itemsRes.data ?? [])
-    .filter((i) => !i.training_day_only || trainingDay)
-    .map((i) => {
-      const m = marks.get(i.key as string);
-      return {
-        key: i.key as string, label: i.label as string, kind: i.kind as 'bool' | 'number', unit: (i.unit as string) ?? null,
-        target: i.target != null ? Number(i.target) : null, due_time: (i.due_time as string)?.slice(0, 5) ?? null,
-        training_day_only: Boolean(i.training_day_only), done: Boolean(m?.done), value: m?.value != null ? Number(m.value) : null,
-        source: (m?.source as string) ?? null,
-      };
-    });
   let challengeDay: DaySummary['challengeDay'] = null;
   if (goal?.kind === 'challenge' && goal.ends_on) {
     const start = Date.parse(goal.starts_on);
@@ -116,7 +96,6 @@ export async function getDaySummary(sb: SupabaseClient, userId: string, day?: st
     totals: t,
     ...progressOf(goal, t),
     meals,
-    checklist,
     challengeDay,
     profile: { timezone: profile.timezone, day_boundary_minutes: profile.day_boundary_minutes, training: profile.training, display_name: profile.display_name },
   };

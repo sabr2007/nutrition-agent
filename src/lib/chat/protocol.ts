@@ -8,7 +8,7 @@ export type ChatPart =
 /** A meal the agent logged, shown as a card under its reply. fat/carbs are optional (older messages). */
 export type LoggedMeal = { id: string; title: string; kcal: number; protein_g: number; fat_g?: number; carbs_g?: number };
 
-export type AgentActionKind = 'meal_edit' | 'body' | 'checklist' | 'slip' | 'reminder' | 'recipe' | 'memory' | 'shopping' | 'food';
+export type AgentActionKind = 'meal_edit' | 'body' | 'slip' | 'reminder' | 'recipe' | 'memory' | 'shopping' | 'food';
 /** A write the agent made outside the meals list, shown as a chip under its reply. */
 export type AgentAction = { kind: AgentActionKind; text: string };
 
@@ -46,7 +46,6 @@ export const TOOL_LABELS: Record<string, string> = {
   log_meal: 'Записываю приём',
   edit_meal: 'Исправляю приём',
   delete_meal: 'Готовлю удаление',
-  update_checklist: 'Отмечаю чек-лист',
   log_body_metric: 'Записываю замер',
   log_slip: 'Записываю срыв',
   get_trends: 'Смотрю динамику',

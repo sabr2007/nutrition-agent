@@ -44,7 +44,7 @@ export function ChatView() {
   const stream = useChatStream({
     onDone: (user, reply) => {
       setSettled((xs) => [...xs, ...(user ? [user] : []), reply]);
-      void refreshToday(); // the agent may have logged food, weight or checklist marks
+      void refreshToday(); // the agent may have logged food or weight
       void mutate();
     },
     refetch: async () => (await mutate())?.messages,

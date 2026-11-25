@@ -4,7 +4,14 @@ const LINKS = [
   { href: '/report', title: 'Отчёт за неделю', hint: 'вес 7д, дни в плане, белок, срывы', glyph: '▤' },
   { href: '/history', title: 'История', hint: 'все дни, текстовые графики', glyph: '≡' },
   { href: '/memory', title: 'Память и навыки', hint: 'что агент помнит — можно править', glyph: '◇' },
-  { href: '/settings', title: 'Настройки', hint: 'цели, расписание, напоминания, модели, пароль', glyph: '⚙' },
+  { href: '/settings', title: 'Настройки', hint: 'цели, Telegram, браслет, напоминания, жиры, пароль', glyph: '⚙' },
+];
+
+// Kept reachable (not in the tab bar) until the Telegram bot is verified in prod by its owner (D30):
+// if the bot fails in the morning, the old chat and manual logging still work.
+const FALLBACK = [
+  { href: '/chat', title: 'Старый чат', hint: 'запасной вход, пока бот не проверен' },
+  { href: '/log', title: 'Ручная запись', hint: 'запасной вход, пока бот не проверен' },
 ];
 
 export default function MorePage() {
@@ -28,7 +35,18 @@ export default function MorePage() {
           </li>
         ))}
       </ul>
-      <pre className="ascii mt-10 text-center text-[10px] text-ink-3" aria-hidden>{'┌─ рядом ─┐\n└─  v1   ─┘'}</pre>
+      <p className="label mt-8 px-1">запасной вход</p>
+      <ul className="mt-2 space-y-1">
+        {FALLBACK.map((l) => (
+          <li key={l.href}>
+            <Link href={l.href} className="press flex items-center justify-between px-1 py-2 text-sm text-ink-2">
+              <span>{l.title} <span className="text-ink-3">· {l.hint}</span></span>
+              <span className="font-mono text-ink-3">→</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <pre className="ascii mt-10 text-center text-[10px] text-ink-3" aria-hidden>{'┌─ рядом ─┐\n└─  v2   ─┘'}</pre>
     </main>
   );
 }

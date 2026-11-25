@@ -9,6 +9,8 @@ import { useSession } from '@/components/auth/AuthGate';
 import { useToast } from '@/components/ui/Toast';
 import { enablePush, pushState, type PushState } from '@/lib/client/push';
 import type { Goal } from '@/lib/nutrition/types';
+import { CoachLimitsCard } from '@/components/settings/CoachLimitsCard';
+import { GoogleHealthCard } from '@/components/settings/GoogleHealthCard';
 
 type Profile = { display_name: string | null; day_boundary_minutes: number; quiet_start: string; quiet_end: string; training: { days: number[]; start: string; end: string } };
 type Rule = { id: string; key: string; title: string; kind: string; enabled: boolean; at_time: string | null };
@@ -128,10 +130,14 @@ export default function SettingsPage() {
         </Section>
       )}
 
+      <Section title="Telegram и проактивность">
+        <CoachLimitsCard userId={uid} />
+      </Section>
+
       <Section title="Напоминания">
         <div className="surface p-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-ink-2">{push === 'enabled' ? 'Пуши включены на этом устройстве.' : push === 'needs-install' ? 'Установи на экран «Домой», чтобы включить пуши.' : push === 'denied' ? 'Уведомления запрещены в настройках iOS.' : 'Пуши выключены.'}</p>
+            <p className="text-sm text-ink-2">Напоминания приходят в Telegram с кнопками. Пуши — запасной канал, пока бот не привязан: {push === 'enabled' ? 'включены на этом устройстве.' : push === 'needs-install' ? 'нужна установка на экран «Домой».' : push === 'denied' ? 'запрещены в настройках iOS.' : 'выключены.'}</p>
             {push === 'enabled' ? (
               <button onClick={async () => { const r = await api<{ delivered: number }>('/api/push/test', { body: {} }); toast({ text: r.delivered ? 'Отправил тестовый пуш' : 'Не доставлено — проверь разрешения' }); }} className="press shrink-0 rounded-full border border-ink px-4 py-2 text-sm">Тест</button>
             ) : push === 'default' ? (
@@ -149,7 +155,6 @@ export default function SettingsPage() {
             </li>
           ))}
         </ul>
-        <p className="mt-2 px-1 text-xs text-ink-3">Агент сам пишет не чаще 3 раз в день и с паузой ≥ 2 ч; после двух сообщений без ответа — замолкает до твоего ответа.</p>
       </Section>
 
       <Section title="Модели">
@@ -173,7 +178,11 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      <Section title="Шаги и сон (Apple Health)">
+      <Section title="Браслет: Google Health">
+        <GoogleHealthCard />
+      </Section>
+
+      <Section title="Запасной путь: Apple «Команды»">
         <HealthImport />
       </Section>
 

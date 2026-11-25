@@ -1,9 +1,12 @@
 /* Рядом — service worker: offline shell, cached Today data, web push. */
-const VERSION = 'v2';
+// The deploy's version (D30): /sw-version.js changes with every deploy → a new worker installs,
+// drops the old caches and takes over; the page reloads once.
+try { importScripts('/sw-version.js'); } catch { /* offline install: keep the fallback */ }
+const VERSION = self.SW_VERSION || 'v3';
 const SHELL = `shell-${VERSION}`;
 const STATIC = `static-${VERSION}`;
 const DATA = `data-${VERSION}`;
-const SHELL_URLS = ['/', '/log', '/chat', '/body', '/more', '/login', '/offline'];
+const SHELL_URLS = ['/', '/body', '/more', '/login', '/offline'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

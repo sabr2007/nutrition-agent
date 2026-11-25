@@ -6,7 +6,7 @@ export const maxDuration = 120;
 
 const TABLES = [
   'profiles', 'goals', 'meals', 'meal_items', 'meal_templates', 'meal_template_items', 'recognitions', 'meal_corrections',
-  'media', 'checklist_items', 'checklist_marks', 'body_metrics', 'workouts', 'slips', 'memories', 'skills',
+  'media', 'archive_checklist_items', 'archive_checklist_marks', 'body_metrics', 'workouts', 'slips', 'memories', 'skills',
   'reminder_rules', 'notifications', 'agent_messages', 'agent_runs', 'llm_calls', 'recipes', 'shopping_lists', 'events',
 ];
 

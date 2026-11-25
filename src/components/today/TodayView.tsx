@@ -1,20 +1,18 @@
 'use client';
 
-import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import useSWR from 'swr';
-import { api, fetcher, newClientId, postOrQueue } from '@/lib/client/api';
-import type { TodayResponse, TemplateLite } from '@/lib/client/types';
+import { api, fetcher } from '@/lib/client/api';
+import type { TodayResponse } from '@/lib/client/types';
 import { dayTitle, fmt } from '@/lib/client/format';
-import { addDays, dayClockMin, localParts } from '@/lib/nutrition/day';
+import { addDays } from '@/lib/nutrition/day';
 import { AsciiBar } from '@/components/ui/Ascii';
 import { PlateDots } from '@/components/ui/PlateDots';
-import { useToast } from '@/components/ui/Toast';
-import { Checklist } from './Checklist';
 import { MealList } from './MealList';
-import { CoachCard } from './CoachCard';
-import { PushPrompt } from './PushPrompt';
+
+// «Сегодня» in the Mini App (v2): the day's header, the top panel and the journal. Logging lives
+// in the Telegram chat; templates in one tap — the bot's /today buttons.
 
 export function TodayView() {
   const params = useSearchParams();
@@ -23,7 +21,6 @@ export function TodayView() {
   const notifId = params.get('n');
   const key = `/api/today${day ? `?day=${day}` : ''}`;
   const { data, error, mutate, isLoading } = useSWR<TodayResponse>(key, fetcher, { revalidateOnFocus: true, refreshInterval: 60_000 });
-  const toast = useToast();
 
   // Opened from a push notification → record the reaction.
   useEffect(() => {
@@ -32,18 +29,6 @@ export function TodayView() {
   }, [notifId]);
 
   const s = data?.summary;
-  const next = useMemo(() => (data ? nextTemplate(data) : null), [data]);
-
-  async function logTemplate(t: TemplateLite) {
-    const clientId = newClientId('tpl');
-    const res = await postOrQueue<{ meal: { id: string; kcal: number; protein_g: number } }>('/api/meals/template', { template_id: t.id, client_id: clientId });
-    if (res.queued) toast({ text: `Нет сети — «${t.name}» запишется позже` });
-    else {
-      const id = res.data!.meal.id;
-      toast({ text: `${t.name} · ${Math.round(res.data!.meal.kcal)} ккал`, action: { label: 'отменить', onClick: () => void api(`/api/meals/${id}`, { method: 'DELETE' }).then(() => mutate()) } });
-    }
-    mutate();
-  }
 
   if (error && !data) {
     return <div className="p-6"><p className="label">ошибка</p><p className="mt-2 text-ink-2">{(error as Error).message}</p><button className="press mt-4 rounded-full border border-ink px-4 py-2" onClick={() => mutate()}>Повторить</button></div>;
@@ -107,35 +92,7 @@ export function TodayView() {
         )}
       </section>
 
-      {s.isToday && next && (
-        <section className="mt-4">
-          <button onClick={() => logTemplate(next)} className="press surface flex w-full items-center gap-3 p-4 text-left">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-linen font-mono text-lg">{next.glyph ?? '+'}</span>
-            <span className="min-w-0 flex-1">
-              <span className="label">по плану · {next.default_time}</span>
-              <span className="block truncate font-medium">{next.name}</span>
-              <span className="font-mono text-xs text-ink-3">{next.kcal} ккал · б {fmt(next.protein_g)} г</span>
-            </span>
-            <span className="rounded-full bg-ink px-4 py-2 text-sm text-linen">записать</span>
-          </button>
-        </section>
-      )}
-
-      {s.isToday && isLate(s.profile.timezone) && !s.checklist.find((c) => c.key === 'close_day')?.done && (
-        <Link href="/chat?skill=close_day" className="press surface framed mt-4 flex items-center justify-between p-4">
-          <span><span className="label">вечер</span><span className="block font-medium">Закрыть день — 30 секунд</span></span>
-          <span className="font-mono text-ink-2">→</span>
-        </Link>
-      )}
-      <CoachCard coach={data!.coach} notification={data!.notification} onChange={() => mutate()} />
-      <PushPrompt />
-
-      <Checklist day={s.day} items={s.checklist} onChange={() => mutate()} />
       <MealList meals={s.meals} timezone={s.profile.timezone} onChange={() => mutate()} />
-
-      <div className="mt-6 flex justify-center">
-        <Link href="/log" className="press font-mono text-sm text-ink-2 underline decoration-dotted underline-offset-4">+ записать задним числом</Link>
-      </div>
     </main>
   );
 }
@@ -153,25 +110,4 @@ function MacroRow({ name, unit, value, min, max, color, big }: { name: string; u
       <AsciiBar value={value} min={min} max={max} color={color} label={name} width={big ? 26 : 11} />
     </div>
   );
-}
-
-function isLate(tz: string): boolean {
-  const h = localParts(new Date(), tz).hour;
-  return h >= 23 || h < 4;
-}
-
-function nextTemplate(data: TodayResponse): TemplateLite | null {
-  const s = data.summary;
-  const tz = s.profile.timezone;
-  const nowMin = dayClockMin(localParts(new Date(), tz).hhmm, s.profile.day_boundary_minutes);
-  const done = new Set(s.checklist.filter((c) => c.done).map((c) => c.key));
-  const loggedTemplates = new Set(s.meals.map((m) => m.template_id).filter(Boolean));
-  const candidates = data.templates
-    .filter((t) => t.default_time && (!t.training_day_only || s.trainingDay))
-    .filter((t) => !loggedTemplates.has(t.id) && !(t.checklist_key && done.has(t.checklist_key)))
-    .map((t) => ({ t, at: dayClockMin(t.default_time!, s.profile.day_boundary_minutes) }))
-    .sort((a, b) => a.at - b.at);
-  // the closest one that is due within the next 90 minutes or overdue
-  const due = candidates.filter((c) => c.at <= nowMin + 90);
-  return (due[due.length - 1] ?? candidates[0])?.t ?? null;
 }

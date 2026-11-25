@@ -28,10 +28,6 @@ export default function BodyPage() {
     setBusy(true);
     const sb = supabaseBrowser();
     const { error } = await sb.from('body_metrics').insert({ user_id: session!.user.id, kind, value, unit: kind === 'weight' ? 'kg' : 'cm', fasted: kind === 'weight' ? true : null });
-    if (!error && kind === 'weight') {
-      const { data: d } = await sb.from('body_metrics').select('local_day').eq('user_id', session!.user.id).order('created_at', { ascending: false }).limit(1).single();
-      if (d) await sb.from('checklist_marks').insert({ user_id: session!.user.id, local_day: d.local_day, item_key: 'weigh', done: true, source: 'auto' });
-    }
     setBusy(false);
     if (error) toast({ text: 'Не сохранилось', tone: 'error' });
     else { toast({ text: kind === 'weight' ? `Вес ${value} кг записан` : `Талия ${value} см записана` }); kind === 'weight' ? setWeight('') : setWaist(''); mutate(); void refreshToday(); }

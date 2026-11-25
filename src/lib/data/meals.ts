@@ -35,8 +35,6 @@ export const SaveMealSchema = z.object({
 });
 export type SaveMealInput = z.infer<typeof SaveMealSchema>;
 
-const SLOT_CHECKLIST: Record<string, string> = { breakfast: 'breakfast', lunch: 'lunch', dinner: 'dinner' };
-
 /** Never trust client-side numbers: recompute macros from the food table when possible. */
 async function recomputeItems(sb: SupabaseClient, items: SaveMealInput['items']): Promise<MealItemInput[]> {
   const ids = [...new Set(items.map((i) => i.food_id).filter((x): x is string => Boolean(x)))];
@@ -63,37 +61,14 @@ async function recomputeItems(sb: SupabaseClient, items: SaveMealInput['items'])
   });
 }
 
-export async function markChecklist(sb: SupabaseClient, userId: string, day: string, key: string, done: boolean, source: 'user' | 'auto' | 'agent' | 'import' = 'auto', value: number | null = null) {
-  const { error } = await sb.from('checklist_marks').insert({ user_id: userId, local_day: day, item_key: key, done, value, source });
-  if (error) throw new Error(`checklist: ${error.message}`);
-}
+export type SavedMeal = { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; satfat_g: number | null };
 
-export type SavedMeal = { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; satfat_g: number | null; checklist: string[] };
-
-export async function saveMeal(sb: SupabaseClient, userId: string, input: SaveMealInput, extra: { checklistKey?: string | null } = {}): Promise<SavedMeal> {
+export async function saveMeal(sb: SupabaseClient, userId: string, input: SaveMealInput): Promise<SavedMeal> {
   const items = await recomputeItems(sb, input.items);
   const payload = { ...input, items };
   const { data, error } = await sb.rpc('save_meal', { p: payload });
   if (error) throw new Error(`save_meal: ${error.message}`);
   const meal = data as { id: string; root_id: string; local_day: string; kcal: number; protein_g: number; fat_g: number; carbs_g: number; satfat_g: number | null; slot: string | null };
-
-  // Auto-check the matching checklist items (template key, or slot for free-form meals).
-  const keys = new Set<string>();
-  if (extra.checklistKey) keys.add(extra.checklistKey);
-  if (!input.supersedes_id && meal.slot && SLOT_CHECKLIST[meal.slot]) keys.add(SLOT_CHECKLIST[meal.slot]);
-  if (!input.supersedes_id) {
-    for (const it of items) {
-      if (/протеин|whey/i.test(it.name)) {
-        // first shake of the day → protein_1, second → protein_2
-        const { data: st } = await sb.from('checklist_state').select('item_key, done').eq('user_id', userId).eq('local_day', meal.local_day).in('item_key', ['protein_1', 'protein_2']);
-        const done = new Set((st ?? []).filter((x) => x.done).map((x) => x.item_key as string));
-        if (!extra.checklistKey?.startsWith('protein')) keys.add(done.has('protein_1') ? 'protein_2' : 'protein_1');
-      }
-      if (/креатин/i.test(it.name)) keys.add('creatine');
-      if (/творог/i.test(it.name) && meal.slot === 'late') keys.add('tvorog');
-    }
-  }
-  for (const k of keys) await markChecklist(sb, userId, meal.local_day, k, true, 'auto');
 
   // Diff between model output and what the user confirmed → personal calibration data.
   if (input.recognition_id) {
@@ -110,19 +85,18 @@ export async function saveMeal(sb: SupabaseClient, userId: string, input: SaveMe
     id: meal.id, root_id: meal.root_id, local_day: meal.local_day,
     kcal: Number(meal.kcal), protein_g: Number(meal.protein_g), fat_g: Number(meal.fat_g), carbs_g: Number(meal.carbs_g),
     satfat_g: meal.satfat_g != null ? Number(meal.satfat_g) : null,
-    checklist: [...keys],
   };
 }
 
 export type TemplateRow = {
-  id: string; key: string | null; name: string; slot: string; default_time: string | null; checklist_key: string | null;
+  id: string; key: string | null; name: string; slot: string; default_time: string | null;
   training_day_only: boolean; glyph: string | null; sort_order: number;
   items: { food_id: string; grams: number; note: string | null; foods: Food }[];
 };
 
 export async function listTemplates(sb: SupabaseClient, userId: string): Promise<(TemplateRow & { kcal: number; protein_g: number; fat_g: number; carbs_g: number })[]> {
   const { data, error } = await sb.from('meal_templates')
-    .select('id, key, name, slot, default_time, checklist_key, training_day_only, glyph, sort_order, items:meal_template_items(food_id, grams, note, sort_order, foods(*))')
+    .select('id, key, name, slot, default_time, training_day_only, glyph, sort_order, items:meal_template_items(food_id, grams, note, sort_order, foods(*))')
     .eq('user_id', userId).is('archived_at', null).order('sort_order');
   if (error) throw new Error(`templates: ${error.message}`);
   return ((data ?? []) as unknown as TemplateRow[]).map((t) => {
@@ -137,7 +111,7 @@ export async function listTemplates(sb: SupabaseClient, userId: string): Promise
 /** One-tap logging of a template (the "breakfast as usual" path). */
 export async function logTemplate(sb: SupabaseClient, userId: string, args: { templateId: string; eatenAt?: string; clientId?: string | null; scale?: number }): Promise<SavedMeal & { name: string }> {
   const { data: t, error } = await sb.from('meal_templates')
-    .select('id, name, slot, checklist_key, items:meal_template_items(food_id, grams, sort_order, foods(*))')
+    .select('id, name, slot, items:meal_template_items(food_id, grams, sort_order, foods(*))')
     .eq('id', args.templateId).eq('user_id', userId).single();
   if (error || !t) throw new Error('Шаблон не найден');
   const scale = args.scale && args.scale > 0 ? args.scale : 1;
@@ -148,7 +122,7 @@ export async function logTemplate(sb: SupabaseClient, userId: string, args: { te
     eaten_at: args.eatenAt ?? new Date().toISOString(),
     slot: t.slot as string, title: t.name as string, input_method: 'template', template_id: t.id as string,
     client_id: args.clientId ?? null, items, confidence: 1,
-  }, { checklistKey: t.checklist_key as string | null });
+  });
   return { ...saved, name: t.name as string };
 }
 

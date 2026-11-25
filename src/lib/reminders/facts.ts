@@ -3,6 +3,8 @@ import { getDaySummary, type DaySummary } from '@/lib/data/day';
 import type { Profile } from '@/lib/data/profile';
 import { getActivity } from '@/lib/health/activity';
 import { hhmmToMin, localParts } from '@/lib/nutrition/day';
+import { localDay } from '@/lib/nutrition/day';
+import { doneToday } from './done';
 import { inQuietHours, minutesSince } from './dsl';
 import type { Facts } from './dsl';
 
@@ -13,8 +15,18 @@ const TRACKED = 'google_health';
 export async function computeFacts(sb: SupabaseClient, userId: string, profile: Profile, now = new Date()): Promise<{ facts: Facts; summary: DaySummary }> {
   const summary = await getDaySummary(sb, userId, undefined, profile);
   const local = localParts(now, profile.timezone);
-  const checked: Record<string, boolean> = {};
-  for (const c of summary.checklist) checked[c.key] = c.done;
+  const since = new Date(now.getTime() - 36 * 3600_000).toISOString();
+  const [{ data: tpl }, { data: reacted }, { data: weights }] = await Promise.all([
+    sb.from('meal_templates').select('id, done_key').eq('user_id', userId).not('done_key', 'is', null),
+    sb.from('notifications').select('rule_key').eq('user_id', userId).eq('local_day', summary.day).eq('reaction', 'done'),
+    sb.from('body_metrics').select('measured_at').eq('user_id', userId).eq('kind', 'weight').gte('measured_at', since),
+  ]);
+  const done = doneToday({
+    meals: summary.meals,
+    templateKeys: new Map((tpl ?? []).map((t) => [t.id as string, t.done_key as string])), // empty until the D30 migration
+    reactedDone: (reacted ?? []).map((n) => n.rule_key as string).filter(Boolean),
+    weighed: (weights ?? []).some((w) => localDay(new Date(w.measured_at as string), profile.timezone, profile.day_boundary_minutes) === summary.day),
+  });
   const loggedSlot: Record<string, boolean> = {};
   for (const m of summary.meals) if (m.slot) loggedSlot[m.slot] = true;
   const lastMeal = summary.meals[summary.meals.length - 1];
@@ -68,7 +80,7 @@ export async function computeFacts(sb: SupabaseClient, userId: string, profile: 
     // Food: since the last meal; with none today — since waking up (or the end of the quiet hours).
     minutes_since_food: sinceLastMeal ?? minutesSinceWake ?? minutesSinceQuietEnd,
     challenge_day: summary.challengeDay?.n ?? null,
-    checked,
+    done,
     logged_slot: loggedSlot,
     training_hint: summary.trainingDay ? ' И банан перед залом.' : '',
     name: profile.display_name ?? '',

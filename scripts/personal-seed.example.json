@@ -30,21 +30,10 @@
       "notes": "Пример: поправь цифры под себя в Настройках."
     }
   ],
-  "checklist": [
-    { "key": "weigh", "label": "Взвешивание натощак", "due_time": "08:30" },
-    { "key": "breakfast", "label": "Завтрак", "due_time": "09:00" },
-    { "key": "lunch", "label": "Обед", "due_time": "13:30" },
-    { "key": "workout", "label": "Тренировка", "due_time": "18:00", "training_day_only": true },
-    { "key": "protein", "label": "Протеин", "due_time": "20:00" },
-    { "key": "dinner", "label": "Ужин", "due_time": "20:30" },
-    { "key": "steps", "label": "Шаги", "kind": "number", "unit": "шаг", "target": 10000 },
-    { "key": "sleep", "label": "Сон", "kind": "number", "unit": "ч", "target": 7 },
-    { "key": "close_day", "label": "Итог дня записан", "due_time": "22:30" }
-  ],
   "templates": [
     {
       "key": "breakfast", "name": "Завтрак: яйца и овсянка", "slot": "breakfast", "default_time": "09:00",
-      "checklist_key": "breakfast", "glyph": "◐",
+      "done_key": "breakfast", "glyph": "◐",
       "items": [
         { "source": "usda_sr", "ref": "01123", "grams": 104, "note": "2 яйца" },
         { "source": "usda_sr", "ref": "08120", "grams": 50, "note": "на воде" }
@@ -52,7 +41,7 @@
     },
     {
       "key": "lunch", "name": "Обед: курица, гречка, салат", "slot": "lunch", "default_time": "13:30",
-      "checklist_key": "lunch", "glyph": "●",
+      "done_key": "lunch", "glyph": "●",
       "items": [
         { "source": "usda_sr", "ref": "05062", "grams": 150, "note": "сырой вес" },
         { "source": "usda_sr", "ref": "20010", "grams": 60, "note": "сухой вес" },
@@ -61,12 +50,12 @@
     },
     {
       "key": "protein", "name": "Протеин", "slot": "shake", "default_time": "20:00",
-      "checklist_key": "protein", "glyph": "◇",
+      "done_key": "protein", "glyph": "◇",
       "items": [{ "source": "seed", "ref": "seed:whey_generic", "grams": 30, "note": "1 скуп" }]
     },
     {
       "key": "dinner", "name": "Ужин: курица и овощи", "slot": "dinner", "default_time": "20:30",
-      "checklist_key": "dinner", "glyph": "◑",
+      "done_key": "dinner", "glyph": "◑",
       "items": [
         { "source": "usda_sr", "ref": "05062", "grams": 150, "note": "сырой вес" },
         { "source": "seed", "ref": "seed:veg_mix_lowstarch", "grams": 300 },
@@ -102,7 +91,7 @@
       "window_minutes": 0, "training_days_only": true,
       "condition": { "all": [
         { "fact": "minutes_since_workout_end", "op": "between", "value": [30, 50] },
-        { "fact": "checked.protein", "op": "eq", "value": false }
+        { "fact": "done.protein", "op": "eq", "value": false }
       ] },
       "template": "После тренировки прошло полчаса — самое время для протеина.", "priority": 4,
       "cooldown_minutes": 180, "deep_link": "/?focus=protein"
@@ -127,7 +116,7 @@
     },
     {
       "key": "close_day", "title": "Закрыть день", "kind": "schedule", "at_time": "22:30", "window_minutes": 30,
-      "condition": { "fact": "checked.close_day", "op": "eq", "value": false },
+      "condition": { "fact": "done.close_day", "op": "eq", "value": false },
       "template": "Закроем день? Проверь, всё ли записано — 30 секунд.", "compose_with_llm": true,
       "skill_key": "close_day", "priority": 3, "cooldown_minutes": 120, "deep_link": "/chat?skill=close_day"
     }

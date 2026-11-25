@@ -4,7 +4,7 @@
  *
  *   node --env-file=.env.local --import tsx scripts/create-user.ts --email you@example.com [--seed path.json]
  *
- * Everything personal (body stats, schedule, goals, checklist, templates, reminders,
+ * Everything personal (body stats, schedule, goals, templates, reminders,
  * memories) is read from scripts/personal-seed.json (gitignored). Plan sections missing
  * there fall back to the generic scripts/personal-seed.example.json; profile fields and
  * memories never do. The generated password is printed ONCE to stdout and never written
@@ -17,7 +17,7 @@ import path from 'node:path';
 
 type Seed = Record<string, unknown>;
 
-const PLAN_SECTIONS = ['goals', 'checklist', 'templates', 'reminders'] as const;
+const PLAN_SECTIONS = ['goals', 'templates', 'reminders'] as const;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
