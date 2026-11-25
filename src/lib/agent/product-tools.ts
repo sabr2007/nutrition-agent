@@ -3,10 +3,24 @@ import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { saveCatalogFood } from '@/lib/data/foods';
 import { offByBarcode, offSearch, type OffProduct } from '@/lib/foods/off';
-import { webNutrition, type WebFood } from '@/lib/foods/web';
+import { webNutrition, type WebFood, type WebMiss } from '@/lib/foods/web';
 import type { Food } from '@/lib/nutrition/types';
 import { searchFoodsSmart } from '@/lib/recognition/match';
-import { relevanceGate } from '@/lib/recognition/relevance';
+import { isContent, relevanceGate, sameStem, tokens } from '@/lib/recognition/relevance';
+
+/** Variant words a product name may carry that change what it is («Coca-Cola Zero» ≠ «Coca-Cola»). */
+const VARIANT = /^(zero|light|lite|diet|sugar|free|без|лайт|зеро|диет|cherry|vanilla|lemon|lime|peach|mango|вишн|ванил|лимон|лайм|персик|манго|клубник|малин|шоколадн|карамел)/;
+
+/** Products the query names best first: fewer unasked variant words, more of the name covered. */
+function rankByName<T extends { name_ru: string; brand?: string | null }>(query: string, items: T[]): T[] {
+  const q = tokens(query).filter(isContent);
+  const score = (f: T) => {
+    const words = tokens(`${f.name_ru} ${f.brand ?? ''}`).filter(isContent);
+    const extra = words.filter((w) => !q.some((x) => sameStem(x, w)));
+    return extra.filter((w) => VARIANT.test(w)).length * 10 + extra.length;
+  };
+  return [...items].sort((a, b) => score(a) - score(b));
+}
 import type { ToolCtx } from './tool-ctx';
 
 // lookup_product (D26): personal base → Open Food Facts → the web. A found product is saved with
@@ -68,16 +82,23 @@ export function productTools(ctx: ToolCtx): ToolSet {
         const offFoods = off.map((p) => asFood(p.code, p.name, p.brand, p.isDrink, p.per100));
         const offGate = a.barcode && offFoods.length ? { ok: true as const, pool: offFoods } : query ? relevanceGate(query, offFoods, { brand: a.brand }) : null;
         if (offGate?.ok) {
-          const p = off.find((x) => x.code === offGate.pool[0].id)!;
+          const pick = a.barcode ? offGate.pool[0] : rankByName(query, offGate.pool)[0];
+          const p = off.find((x) => x.code === pick.id)!;
           const food = await save({ source: 'off', source_ref: p.url, barcode: p.code, name: p.name, brand: p.brand, isDrink: p.isDrink, per100: p.per100, servingG: p.servingG });
           return reply('open_food_facts', food, p.url);
         }
         // 3. The web: the plan's built-in search, numbers copied from the page, then checked.
         let web: WebFood | null = null;
+        let webMiss: WebMiss | 'error' | 'not_relevant' | null = null;
         try {
-          web = await webNutrition(userId, `${query}${a.barcode ? ` (штрихкод ${a.barcode})` : ''}`, ctx.runId);
-        } catch {
-          web = null;
+          const r = await webNutrition(userId, `${query}${a.barcode ? ` (штрихкод ${a.barcode})` : ''}`, ctx.runId);
+          if ('miss' in r) {
+            webMiss = r.miss;
+            console.warn('[lookup_product] web miss', r.miss, r.detail?.slice(0, 160));
+          } else web = r;
+        } catch (e) {
+          webMiss = 'error';
+          console.warn('[lookup_product] web error', (e as Error).message?.slice(0, 160));
         }
         if (web) {
           const candidate = asFood('web', web.name, web.brand, web.basis === '100ml', web.per100);
@@ -87,7 +108,8 @@ export function productTools(ctx: ToolCtx): ToolSet {
             return reply('web', food, web.url);
           }
         }
-        return { found: false, hint: 'Надёжных цифр не нашёл. Спроси кнопками (ask_user): «Скажу калорийность», «Сфоткаю этикетку»; похожий общий продукт — только если он выберет его сам (allow_generic).' };
+        if (web && !webMiss) webMiss = 'not_relevant';
+        return { found: false, checked: { personal: true, open_food_facts: off.length, web: webMiss }, hint: 'Надёжных цифр не нашёл. Спроси кнопками (ask_user): «Скажу калорийность», «Сфоткаю этикетку»; похожий общий продукт — только если он выберет его сам (allow_generic).' };
       },
     }),
   };
