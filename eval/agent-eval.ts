@@ -12,7 +12,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } fr
 import path from 'node:path';
 import { runAgent } from '@/lib/agent/run';
 import { AGENT_PROMPT_VERSION } from '@/lib/agent/context';
-import { checkScenario, SCENARIOS } from '@/lib/agent/scenarios';
+import { checkScenario, scenarioHistory, scenarioWorld, SCENARIOS } from '@/lib/agent/scenarios';
 
 async function main() {
   const [email, passFile] = process.argv.slice(2);
@@ -24,9 +24,10 @@ async function main() {
   const sb = createClient(url, key, { auth: { persistSession: false }, global: { headers: { Authorization: `Bearer ${data.session!.access_token}` } } });
   const results = [];
   for (const s of SCENARIOS) {
-    const r = await runAgent({ sb, userId: data.user!.id, trigger: 'eval', userText: s.prompt, dryRun: true, persist: false, history: [] });
+    const world = scenarioWorld(s);
+    const r = await runAgent({ sb, userId: data.user!.id, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: world, persist: false, history: scenarioHistory(s) });
     const tools = r.toolCalls.map((t) => t.tool);
-    const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error' });
+    const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error', effects: world.effects, choices: Boolean(r.ui.choices) });
     results.push({ id: s.id, pass: fails.length === 0, fails, tools, model: r.model, latencyMs: r.latencyMs, reply: r.text.slice(0, 500) });
     console.log(`${fails.length ? '✗' : '✓'} ${s.id} [${tools.join(' → ') || '-'}] ${r.latencyMs}ms ${fails.join('; ')}`);
   }

@@ -9,9 +9,10 @@ import { getChatgptToken } from '@/lib/llm/chatgpt';
 import { classifyError } from '@/lib/llm/router';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { runAgent } from '@/lib/agent/run';
-import { checkScenario, SCENARIOS } from '@/lib/agent/scenarios';
+import { checkScenario, scenarioHistory, scenarioWorld, SCENARIOS } from '@/lib/agent/scenarios';
 
-export const maxDuration = 180;
+// 15 scenarios × up to ~40 s each, three at a time.
+export const maxDuration = 300;
 
 // Self-check of the ChatGPT plan route: the account's model catalog, tiny probes of every
 // capability the app relies on (text, reasoning effort, structured output, namespaced tools,
@@ -30,6 +31,8 @@ const Body = z.object({
   models: z.array(z.string().regex(/^[a-z0-9.\-]+$/)).max(6).optional(),
   probes: z.boolean().default(true),
   agent: z.boolean().default(false),
+  /** Run only these scenario ids. */
+  scenarios: z.array(z.string().max(40)).max(40).optional(),
 }).default({ probes: true, agent: false });
 
 type Probe = { ok: boolean; ms: number; out?: string; error?: string };
@@ -58,16 +61,20 @@ async function resolveUser(req: Request): Promise<{ userId: string; sb: Supabase
 }
 
 /** Agent eval scenarios on the real prompt and data, write tools simulated. */
-async function runScenarios(sb: SupabaseClient, userId: string) {
-  const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string }[] = [];
-  for (let i = 0; i < SCENARIOS.length; i += SCENARIO_CONCURRENCY) {
-    const batch = SCENARIOS.slice(i, i + SCENARIO_CONCURRENCY);
-    const runs = await Promise.all(batch.map((s) => runAgent({ sb, userId, trigger: 'eval', userText: s.prompt, dryRun: true, persist: false, history: [] })));
+async function runScenarios(sb: SupabaseClient, userId: string, only?: string[]) {
+  const out: { id: string; pass: boolean; fails: string[]; tools: string[]; ms: number; reply: string; model: string | null }[] = [];
+  const selected = only?.length ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS;
+  for (let i = 0; i < selected.length; i += SCENARIO_CONCURRENCY) {
+    const batch = selected.slice(i, i + SCENARIO_CONCURRENCY);
+    const worlds = batch.map((s) => scenarioWorld(s));
+    const runs = await Promise.all(batch.map((s, j) => runAgent({
+      sb, userId, trigger: 'eval', userText: s.prompt, dryRun: true, dryWorld: worlds[j], persist: false, history: scenarioHistory(s),
+    })));
     batch.forEach((s, j) => {
       const r = runs[j];
       const tools = r.toolCalls.map((t) => t.tool);
-      const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error' });
-      out.push({ id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2) });
+      const fails = checkScenario(s, { tools, text: r.text, error: r.decision === 'error', effects: worlds[j].effects, choices: Boolean(r.ui.choices) });
+      out.push({ id: s.id, pass: !fails.length, fails, tools, ms: r.latencyMs, reply: r.text.slice(0, OUT_PREVIEW * 2), model: r.model });
     });
   }
   return { passed: out.filter((r) => r.pass).length, total: out.length, results: out };
@@ -127,7 +134,7 @@ export const POST = handler(async (req) => {
   rateLimit(`chatgpt-check:${userId}`, 6, 60 * 60_000);
   const parsed = Body.safeParse(await req.json().catch(() => undefined));
   if (!parsed.success) throw new HttpError(400, 'Некорректный запрос', 'validation');
-  const { probes, agent } = parsed.data;
+  const { probes, agent, scenarios } = parsed.data;
   const models = parsed.data.models?.length ? parsed.data.models : DEFAULT_MODELS;
   const token = await getChatgptToken(userId);
   if (!token) return json({ connected: false });
@@ -144,6 +151,6 @@ export const POST = handler(async (req) => {
     connected: true,
     catalog: probes ? await catalog(token) : null,
     results,
-    agent: agent ? await runScenarios(sb, userId) : null,
+    agent: agent ? await runScenarios(sb, userId, scenarios) : null,
   });
 });
