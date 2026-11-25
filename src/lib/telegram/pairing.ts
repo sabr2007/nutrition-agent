@@ -13,7 +13,7 @@ const REFUSAL_GAP_MS = 60_000;
 const ATTEMPTS_PER_HOUR = 5;
 const attempts = new Map<number, number[]>();
 
-export type StrangerDeps = { store: TgStore; bot: BotApi; pairingCode: string; now?: () => Date };
+export type StrangerDeps = { store: TgStore; bot: BotApi; pairingCode: string; now?: () => Date; onPaired?: () => Promise<void> };
 
 export const codeHash = (code: string) => createHash('sha256').update(code.trim()).digest('hex');
 
@@ -37,6 +37,7 @@ export async function tryPair(c: Classified, deps: StrangerDeps): Promise<'paire
   if (!owner || owner.telegramUserId != null) return 'rejected';
   await deps.store.linkTelegram(owner.userId, c.fromId, c.chatId, hash);
   await deps.bot.sendMessage(c.chatId, `Готово: бот привязан к твоему «Рядом».\n\n${HELP_HTML}`, { parse_mode: 'HTML' });
+  await deps.onPaired?.().catch(() => undefined);
   return 'paired';
 }
 

@@ -9,8 +9,8 @@
 |---|---|---|---|
 | До v2: матчинг продуктов (D24, баг Fuse Tea) | ✅ | Гейт релевантности, `needs_food`, `save_user_food`, названия из состава, `edit_meal` с `replace` и чтением из базы, откат своей ошибки ≤ 30 мин. Миграция `20261126000100` в проде (проверено SQL: БЖУ nullable, индекс, журнал, `search_foods` отдаёт алиасы). Калибровка на 190 запросах против прод-поиска: 147 верных совпадений, 43 честных `needs_food`, 0 подмен. Unit 126/126. Прод-деплой `158b3c3` + `9bddcfd`; eval в проде (dry-run, `gpt-6-luna`): 4/4 новых сценария, полный набор 14/15 → после правки промпта (agent-v5) провал `crash_diet` закрыт (3/3 на перепроверке). Строки — в `docs/research/agent-evals.md` | `src/lib/recognition/relevance.ts`, `src/lib/agent/meal-tools.ts`, `meal-title.ts`, `dry-world.ts`, `src/lib/nutrition/user-food.ts` |
 | 0. Аудит и базовая линия | ✅ | Доки и код прочитаны. Базовая линия до v2: typecheck ✓, unit 78/78, lint — 8 старых ошибок (`LogView`, `FoodSearch`, `AuthGate`; первые два удаляются в фазе 6, CI lint не запускает), eval 11/11 (24.11). Исследования: `docs/research/telegram-bot-api.md`, `docs/research/google-health-api.md`. Секреты бота и Google — в Vercel env (production/preview). Замеры «до» — `docs/PERF.md`: JS «Сегодня» 214,8 KB gzip, данные на экране через 5,2 с (Slow 4G, CPU ×4), `/api/today` p50 1 028 / p95 1 992 мс; главная причина — функции в `iad1`, база во Франкфурте | `docs/PERF.md` |
-| 1. Бот: транспорт и доступ | ⏳ | | `src/app/api/telegram/webhook/route.ts`, `src/lib/telegram/*`, миграция `tg_updates`, `scripts/telegram-setup.ts` |
-| 2. Бот: полноценный ввод | ⏳ | | `src/lib/telegram/{media,format,keyboards,callbacks,commands}.ts` |
+| 1. Бот: транспорт и доступ | 🟡 | Вебхук с секретом, `tg_updates` (идемпотентность по `update_id`), аренда чата, cron-страховка `tg_requeue`, привязка кодом, отказ чужим (D25). Миграции `20261126000200/0300` в проде (4 таблицы, RLS без политик, функции только service role). Прод `23875e2`: `setWebhook` → `getWebhookInfo` url прод, `pending 0`, `allowed_updates [message, callback_query]`; синтетика: без секрета/неверный → 401; чужой → 200, одна строка `foreign/ignored`, `payload {}`, отказ отправлен (троттлинг), дубль → без второй строки. **Ждёт владельца**: привязка `/start <код>` и живое сообщение | `src/lib/telegram/{webhook,worker,store,pairing}.ts`, `scripts/telegram-setup.ts` |
+| 2. Бот: полноценный ввод | 🟡 | Фото (sharp ≤1280/2048 → бакет `media`), альбомы одним ходом, голос/аудио/кружок → Whisper (OGG принимает напрямую — проверено), стрим `sendMessageDraft` + `typing`, Markdown → Telegram HTML с нарезкой 4096, карточки записанного, кнопки (варианты, подтверждения, память, удалить, шаблоны), `/today /week /deep /mute /help`. Интеграционные тесты с моком Bot API: 15 сценариев (чужой, привязка, дубль, кнопка + повторное нажатие, альбом, голос, отказ разметки, падение → повтор → успех, 3 попытки, аренда). Живая проверка — после привязки | `src/lib/telegram/{turn,reply,callbacks,commands,media,stream,format}.ts` |
 | 3. Модель и умения | ⏳ | | `src/lib/llm/models.ts`, `lookup_product`, жиры, белок на 100 ккал, eval |
 | 4. Google Health | ⏳ | | `src/lib/health/*`, `src/app/api/health/google/*`, `health_daily`, `health_sleep` |
 | 5. Проактивность в Telegram | ⏳ | | `src/lib/reminders/engine.ts`, доставка в Telegram, лимиты |
@@ -21,7 +21,7 @@
 ### Definition of Done
 | # | Пункт | Статус | Доказательство |
 |---|---|---|---|
-| 1 | Только владелец; чужой `user_id` → отказ без LLM | ⏳ | |
+| 1 | Только владелец; чужой `user_id` → отказ без LLM | 🟡 | прод: чужой апдейт → `foreign/ignored`, `payload {}`, без `agent_runs`; владелец — после привязки |
 | 2 | «грудка 250, рис 150» → приём, карточка, Mini App | ⏳ | |
 | 3 | Голосовое → расшифровка → приём | ⏳ | |
 | 4 | Фото тарелки → `input_method='photo'`, `recognitions`, `media` | ⏳ | |
@@ -32,7 +32,7 @@
 | 9 | «Что съесть на ужин?» → граммы, белок на 100 ккал, «Записать» | ⏳ | |
 | 10 | Google Health подключён или код готов | ⏳ | |
 | 11 | Проактивность в Telegram, лимиты | ⏳ | |
-| 12 | Дубликат `update_id`, повтор упавшего апдейта | ⏳ | |
+| 12 | Дубликат `update_id`, повтор упавшего апдейта | 🟡 | прод: повтор того же `update_id` → одна строка; повтор упавшего — тесты (`telegram-bot.test.ts`), в проде — после привязки |
 | 13 | Mini App из menu button, вход по `initData`, iOS + Web | ⏳ | |
 | 14 | Нет «Чата», «+», `/log`, чек-листа, `PushPrompt` | ⏳ | |
 | 15 | Цели производительности, «до/после» | ⏳ | |

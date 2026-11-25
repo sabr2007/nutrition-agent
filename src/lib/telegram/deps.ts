@@ -7,6 +7,7 @@ import { supabaseAdmin, supabaseAsUser } from '@/lib/supabase/server';
 import { httpBot, type BotApi } from './bot';
 import { savePhoto, transcribeVoice } from './media';
 import { handleStranger } from './pairing';
+import { deliverPhaseReports } from './phase-reports';
 import { supabaseTgStore, type Owner, type TgStore } from './store';
 import { runTurn, type TurnDeps } from './turn';
 import type { WebhookDeps } from './webhook';
@@ -46,7 +47,7 @@ export function telegramRuntime(): TelegramRuntime {
     store, secret: env.telegramWebhookSecret, schedule,
     process: (chatId, owner) => processChat(chatId, owner, worker),
     ackCallback: async (id) => { await bot.answerCallbackQuery(id).catch(() => undefined); },
-    stranger: (c) => handleStranger(c, { store, bot, pairingCode: env.telegramPairingCode }),
+    stranger: (c) => handleStranger(c, { store, bot, pairingCode: env.telegramPairingCode, onPaired: async () => { await deliverPhaseReports(supabaseAdmin(), bot); } }),
   };
   return { store, bot, turn, worker, webhook };
 }
@@ -55,6 +56,7 @@ export function telegramRuntime(): TelegramRuntime {
 export async function retryTelegram(): Promise<number> {
   if (!telegramConfigured()) return 0;
   const rt = telegramRuntime();
+  await deliverPhaseReports(supabaseAdmin(), rt.bot).catch((e) => console.error('[telegram] phase reports', (e as Error).message?.slice(0, 120)));
   const chats = await rt.store.requeue(MAX_ATTEMPTS);
   for (const ch of chats) {
     const owner: Owner = { userId: ch.userId, telegramUserId: 0, chatId: ch.chatId };
