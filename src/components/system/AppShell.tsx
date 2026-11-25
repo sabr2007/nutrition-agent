@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
-import { resubscribeIfGranted } from '@/lib/client/push';
 import { ToastProvider } from '@/components/ui/Toast';
 import { TelegramBridge } from './TelegramBridge';
 
@@ -21,7 +20,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const hideNav = FULL_SCREEN.some((p) => path.startsWith(p));
   // iOS can rotate push subscriptions silently: re-save on every launch (no prompt).
-  useEffect(() => { void resubscribeIfGranted().catch(() => undefined); }, []);
+  // Loaded after the first screen: push is only the fallback channel until the bot is linked (D29).
+  useEffect(() => { void import('@/lib/client/push').then((m) => m.resubscribeIfGranted()).catch(() => undefined); }, []);
   return (
     <ToastProvider>
       <TelegramBridge />

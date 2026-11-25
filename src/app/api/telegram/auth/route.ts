@@ -24,5 +24,8 @@ export const POST = handler(async (req) => {
   const { data: owner } = await supabaseAdmin().from('profiles').select('user_id').eq('telegram_user_id', check.telegramUserId).maybeSingle();
   if (!owner) throw new HttpError(403, 'Этот Telegram не привязан. Напиши боту /start <код>', 'not_linked');
   const s = await mintOwnerSession(owner.user_id as string);
-  return json({ access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at }, { headers: { 'Cache-Control': 'no-store' } });
+  return json({
+    access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at, expires_in: s.expires_in, token_type: s.token_type,
+    user: { id: s.user.id, email: s.user.email ?? null },
+  }, { headers: { 'Cache-Control': 'no-store' } });
 });

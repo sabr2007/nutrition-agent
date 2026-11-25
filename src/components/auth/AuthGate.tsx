@@ -2,53 +2,51 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Session } from '@supabase/supabase-js';
-import { supabaseBrowser } from '@/lib/supabase/browser';
 import { isBackendConfigured } from '@/lib/env';
+import { onSession, readSession, writeSession, type LiteSession } from '@/lib/client/session';
 import { launchInitData } from '@/lib/client/telegram';
 
-const SessionCtx = createContext<Session | null>(null);
+const SessionCtx = createContext<LiteSession | null>(null);
 export const useSession = () => useContext(SessionCtx);
 
-type TgAuth = { access_token: string; refresh_token: string } | { error: { message: string } };
+type TgAuth = LiteSession | { error: { message: string } };
 
 /**
  * Inside Telegram the Mini App signs in with the launch data (POST /api/telegram/auth → the owner's
  * ordinary Supabase session, kept in localStorage — cookies do not survive the Telegram Web iframe).
- * Outside Telegram — the password login as before.
+ * Outside Telegram — the password login as before. No supabase-js here (D31).
  */
-async function signInWithTelegram(): Promise<{ session: Session | null; error: string | null }> {
-  const initData = launchInitData();
-  if (!initData) return { session: null, error: null };
+async function signInWithTelegram(initData: string): Promise<string | null> {
   const res = await fetch('/api/telegram/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) }).catch(() => null);
   const body = (await res?.json().catch(() => null)) as TgAuth | null;
-  if (!res?.ok || !body || 'error' in body) return { session: null, error: (body && 'error' in body && body.error.message) || 'Не удалось войти через Telegram' };
-  const { data, error } = await supabaseBrowser().auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
-  return { session: data.session, error: error ? error.message : null };
+  if (!res?.ok || !body || 'error' in body) return (body && 'error' in body && body.error.message) || 'Не удалось войти через Telegram';
+  writeSession(body);
+  return null;
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [session, setSession] = useState<Session | null | undefined>(() => (isBackendConfigured() ? undefined : null));
+  // undefined: still deciding; null: signed out.
+  const [session, setSession] = useState<LiteSession | null | undefined>(() => (isBackendConfigured() ? undefined : null));
   const [tgError, setTgError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isBackendConfigured()) return;
-    const sb = supabaseBrowser();
     let alive = true;
-    void sb.auth.getSession().then(async ({ data }) => {
-      if (data.session || !launchInitData()) { if (alive) setSession(data.session); return; }
-      const r = await signInWithTelegram();
-      if (!alive) return;
-      setTgError(r.error);
-      setSession(r.session ?? (r.error ? undefined : null));
-    });
-    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => { if (s || !launchInitData()) setSession(s); });
-    return () => { alive = false; sub.subscription.unsubscribe(); };
+    const decide = (s: LiteSession | null) => {
+      if (s) { setSession(s); return; }
+      const initData = launchInitData();
+      if (!initData) { setSession(null); return; }
+      void signInWithTelegram(initData).then((error) => { if (alive && error) setTgError(error); });
+    };
+    // Storage is read after hydration (the server renders «загрузка» too), then kept in sync.
+    void Promise.resolve().then(() => { if (alive) decide(readSession()); });
+    const off = onSession((s) => { if (alive) decide(s); });
+    return () => { alive = false; off(); };
   }, []);
 
   useEffect(() => {
-    if (session === null && !launchInitData()) router.replace('/login');
+    if (session === null) router.replace('/login');
   }, [session, router]);
 
   if (tgError) {

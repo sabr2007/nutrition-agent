@@ -7,7 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 // right away (no e-mail is sent). Bot turns and the Mini App then use the ordinary user JWT,
 // so RLS and auth.uid() work exactly as in the app (D25). The service role never leaves the server.
 
-export type OwnerSession = { access_token: string; refresh_token: string; expires_at: number; expires_in: number; token_type: string; user: { id: string } };
+export type OwnerSession = { access_token: string; refresh_token: string; expires_at: number; expires_in: number; token_type: string; user: { id: string; email?: string } };
 
 /** Reuse a cached access token while it has this much life left. */
 const MIN_LIFE_MS = 5 * 60_000;

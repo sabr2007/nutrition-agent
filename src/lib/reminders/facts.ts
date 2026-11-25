@@ -29,7 +29,8 @@ export async function computeFacts(sb: SupabaseClient, userId: string, profile: 
   });
   const loggedSlot: Record<string, boolean> = {};
   for (const m of summary.meals) if (m.slot) loggedSlot[m.slot] = true;
-  const lastMeal = summary.meals[summary.meals.length - 1];
+  // The last meal already eaten at `now` (a preview at a past hour must not see later meals).
+  const lastMeal = summary.meals.filter((m) => Date.parse(m.eaten_at) <= now.getTime()).at(-1);
 
   // Workout end: a logged workout wins; otherwise the training schedule.
   let minutesSinceWorkoutEnd: number | null = null;

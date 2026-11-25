@@ -2,9 +2,8 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import useSWR, { preload } from 'swr';
-import { api, fetcher } from '@/lib/client/api';
-import { readDay, writeDay } from '@/lib/client/day-cache';
+import { api } from '@/lib/client/api';
+import { preloadDay, useDay } from '@/lib/client/use-day';
 import type { TodayResponse } from '@/lib/client/types';
 import { dayTitle, fmt } from '@/lib/client/format';
 import { addDays } from '@/lib/nutrition/day';
@@ -21,11 +20,8 @@ export function TodayView() {
   const day = params.get('day');
   const notifId = params.get('n');
   const key = `/api/today${day ? `?day=${day}` : ''}`;
-  // Cached copy first, fresh data in the background; refresh on focus (back from the bot), no polling.
-  const { data, error, mutate, isLoading } = useSWR<TodayResponse>(key, fetcher, {
-    fallbackData: readDay<TodayResponse>(key), revalidateOnMount: true, revalidateOnFocus: true, keepPreviousData: true,
-    onSuccess: (d) => writeDay(key, d),
-  });
+  // Known day first, fresh data in the background; refresh on return to the app (back from the bot), no polling.
+  const { data, error, isLoading, revalidate, setLocal } = useDay<TodayResponse>(key);
 
   // Opened from a push notification → record the reaction.
   useEffect(() => {
@@ -38,18 +34,24 @@ export function TodayView() {
   // The neighbouring days are one tap away: fetch them ahead.
   useEffect(() => {
     if (!s) return;
-    for (const d of [addDays(s.day, -1), ...(s.isToday ? [] : [addDays(s.day, 1)])]) void preload(`/api/today?day=${d}`, fetcher).catch(() => undefined);
+    for (const d of [addDays(s.day, -1), ...(s.isToday ? [] : [addDays(s.day, 1)])]) preloadDay(`/api/today?day=${d}`);
   }, [s?.day, s?.isToday]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Delete without waiting: the meal and its numbers leave the screen at once, back on failure. */
   async function removeMeal(id: string) {
-    await mutate(api(`/api/meals/${id}`, { method: 'DELETE' }).then(() => undefined), {
-      optimisticData: (cur) => (cur ? withoutMeal(cur, id) : cur!), rollbackOnError: true, populateCache: false, revalidate: true,
-    });
+    const before = data;
+    setLocal((cur) => withoutMeal(cur, id));
+    try {
+      await api(`/api/meals/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      if (before) setLocal(() => before);
+      throw e;
+    }
+    void revalidate();
   }
 
   if (error && !data) {
-    return <div className="p-6"><p className="label">ошибка</p><p className="mt-2 text-ink-2">{(error as Error).message}</p><button className="press mt-4 rounded-full border border-ink px-4 py-2" onClick={() => mutate()}>Повторить</button></div>;
+    return <div className="p-6"><p className="label">ошибка</p><p className="mt-2 text-ink-2">{(error as Error).message}</p><button className="press mt-4 rounded-full border border-ink px-4 py-2" onClick={() => void revalidate()}>Повторить</button></div>;
   }
   if (isLoading || !s) return <div className="p-6"><span className="ascii text-ink-3 blink">загрузка</span></div>;
 
@@ -110,7 +112,7 @@ export function TodayView() {
         )}
       </section>
 
-      <MealList meals={s.meals} timezone={s.profile.timezone} onChange={() => mutate()} onDelete={removeMeal} />
+      <MealList meals={s.meals} timezone={s.profile.timezone} onChange={() => void revalidate()} onDelete={removeMeal} />
     </main>
   );
 }

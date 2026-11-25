@@ -48,7 +48,7 @@ async function asMiniApp(page: Page): Promise<{ calls: () => Promise<string[]>; 
   const saved: unknown[] = [];
   const json = (route: Route, body: unknown) => route.fulfill({ json: body });
   await page.route('https://telegram.org/**', (r) => r.fulfill({ contentType: 'application/javascript', body: '' }));
-  await page.route('**/api/telegram/auth', (r) => json(r, { access_token: jwt(), refresh_token: 'refresh', expires_at: Math.floor(Date.now() / 1000) + 3600 }));
+  await page.route('**/api/telegram/auth', (r) => json(r, { access_token: jwt(), refresh_token: 'refresh', expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, token_type: 'bearer', user: { id: USER_ID, email: 'owner@example.test' } }));
   await page.route('**/auth/v1/user**', (r) => json(r, { id: USER_ID, aud: 'authenticated', role: 'authenticated', email: 'owner@example.test', app_metadata: {}, user_metadata: {}, created_at: '2026-11-01T00:00:00Z' }));
   await page.route('**/api/today**', (r) => json(r, today));
   await page.route('**/api/meals', async (r) => { saved.push(r.request().postDataJSON()); await json(r, { meal: { id: 'new', kcal: 600 } }); });
