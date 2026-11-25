@@ -40,6 +40,8 @@ export type AgentOptions = {
   images?: AgentImage[];
   /** «Думать дольше»: the stronger model with more reasoning. */
   deep?: boolean;
+  /** Where the reply is shown: the app's chat or Telegram (formatting rules differ). */
+  channel?: 'app' | 'telegram';
   skillKey?: string | null;
   proactive?: { reason: string; ruleKey?: string | null; template?: string | null; sentToday: number; lastSentAt?: string | null };
   dryRun?: boolean;
@@ -141,6 +143,7 @@ async function prepare(opts: AgentOptions, userText: string, images: AgentImage[
     profile, summary, memory, skills, mode, proactive: opts.proactive, activeSkill, safety, now: opts.now,
     foodReport: mode === 'chat' && isFoodReport(userText), photos: images.length,
     correction: mode === 'chat' && isCorrection(userText), statedKcal: mode === 'chat' && statesCalories(userText),
+    channel: opts.channel ?? 'app',
   });
   const messages: ModelMessage[] = [...history];
   if (userText || images.length) messages.push({ role: 'user', content: userContent(userText, images) } as ModelMessage);
@@ -162,7 +165,7 @@ async function persistTurn(opts: AgentOptions, a: {
       ...a.images.map((i) => ({ type: 'image' as const, media_id: i.mediaId, path: i.path })),
       ...(a.userText ? [{ type: 'text' as const, text: a.userText }] : []),
     ];
-    rows.push({ user_id: opts.userId, role: 'user', kind: 'chat', text: a.userText, parts, run_id: a.runId, meta: {}, created_at: new Date(a.t0).toISOString() });
+    rows.push({ user_id: opts.userId, role: 'user', kind: 'chat', text: a.userText, parts, run_id: a.runId, meta: { channel: opts.channel ?? 'app' }, created_at: new Date(a.t0).toISOString() });
   }
   if (a.withReply) {
     rows.push({
@@ -170,7 +173,7 @@ async function persistTurn(opts: AgentOptions, a: {
       parts: [{ type: 'text', text: a.text }], run_id: a.runId,
       meta: {
         choices: a.ui.choices ?? null, proposed_memories: a.ui.proposedMemories, pending_actions: a.ui.pendingActions,
-        logged_meals: a.ui.loggedMeals, actions: a.ui.actions, model: a.model, deep: Boolean(opts.deep),
+        logged_meals: a.ui.loggedMeals, actions: a.ui.actions, model: a.model, deep: Boolean(opts.deep), channel: opts.channel ?? 'app',
       },
       created_at: new Date(Math.max(Date.now(), a.t0 + 1)).toISOString(),
     });

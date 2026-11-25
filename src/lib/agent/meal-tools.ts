@@ -236,7 +236,7 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           ctx.dry.meals.set(id, meal);
           const back = readBack(meal);
           ctx.dry.effects.push({ kind: 'log', meal_id: id, title, kcal: back.kcal });
-          ctx.ui.loggedMeals.push({ id, title, kcal: back.kcal, protein_g: back.protein_g });
+          ctx.ui.loggedMeals.push({ id, title, kcal: back.kcal, protein_g: back.protein_g, fat_g: back.fat_g, carbs_g: back.carbs_g });
           return { saved: true, dry_run: true, ...back };
         }
 
@@ -256,7 +256,7 @@ export function mealTools(ctx: ToolCtx): ToolSet {
           client_id: `agent:${ctx.runId}:${JSON.stringify(items).length}:${items.map((i) => i.food_id.slice(0, 4) + i.grams).join('')}`.slice(0, 80),
           items,
         }, { checklistKey: template?.checklist_key ?? null });
-        ctx.ui.loggedMeals.push({ id: saved.id, title, kcal: Math.round(saved.kcal), protein_g: saved.protein_g });
+        ctx.ui.loggedMeals.push({ id: saved.id, title, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g });
         return {
           saved: true, meal_id: saved.id, title, day: saved.local_day, kcal: Math.round(saved.kcal), protein_g: saved.protein_g, fat_g: saved.fat_g, carbs_g: saved.carbs_g,
           kcal_range: range[1] - range[0] > 40 ? [Math.round(range[0]), Math.round(range[1])] : null,

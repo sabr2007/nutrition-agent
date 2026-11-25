@@ -5,7 +5,8 @@ export type ChatPart =
   | { type: 'text'; text: string }
   | { type: 'image'; media_id: string; path: string };
 
-export type LoggedMeal = { id: string; title: string; kcal: number; protein_g: number };
+/** A meal the agent logged, shown as a card under its reply. fat/carbs are optional (older messages). */
+export type LoggedMeal = { id: string; title: string; kcal: number; protein_g: number; fat_g?: number; carbs_g?: number };
 
 export type AgentActionKind = 'meal_edit' | 'body' | 'checklist' | 'slip' | 'reminder' | 'recipe' | 'memory' | 'shopping' | 'food';
 /** A write the agent made outside the meals list, shown as a chip under its reply. */

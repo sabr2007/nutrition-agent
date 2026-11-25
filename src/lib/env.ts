@@ -18,6 +18,13 @@ export function serverEnv() {
     // Speech-to-text only (Whisper): the ChatGPT plan has no transcription.
     cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? '',
     cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? '',
+    // Telegram bot (v2): the main interface. The pairing code links the owner's account once.
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
+    telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
+    telegramPairingCode: process.env.TELEGRAM_PAIRING_CODE ?? '',
+    // Google Health (wearable data) OAuth web client.
+    googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   };
 }
 
