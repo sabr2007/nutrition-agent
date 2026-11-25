@@ -23,7 +23,7 @@ async function preview(req: Request): Promise<Response | null> {
   const at = /^\d\d:\d\d$/.test(body.at ?? '') ? body.at! : null;
   const now = at ? instantForLocal(todayFor(profile), at, profile.timezone, profile.day_boundary_minutes) : new Date();
   const reports = await runTick(admin, now, async () => 0, { preview: true });
-  return json({ ok: true, preview: true, at: now.toISOString(), reports: reports.map((r) => ({ considered: r.considered, would_send: r.sent, skipped: r.skipped, errors: r.errors })) });
+  return json({ ok: true, preview: true, at: now.toISOString(), reports: reports.map((r) => ({ considered: r.considered, would_send: r.sent, skipped: r.skipped, errors: r.errors, facts: r.facts })) });
 }
 
 async function tick(req: Request): Promise<Response> {

@@ -80,14 +80,14 @@ test('three tabs, no chat, no «+», no checklist; the journal edits grams in pl
   await page.getByRole('button', { name: 'Сохранить' }).click();
   await expect.poll(() => app.saved.length).toBe(1);
   expect(app.saved[0]).toMatchObject({ supersedes_id: MEAL_ID, items: [{ name: 'Куриная грудка', grams: 300, edited: true }, { name: 'Рис отварной', grams: 150, edited: false }] });
-  expect(await app.calls()).toEqual(expect.arrayContaining(['ready', 'expand', 'no-swipes', 'header:#efede4', 'bg:#efede4', 'back:hide', 'haptic:success']));
+  await expect.poll(app.calls).toEqual(expect.arrayContaining(['ready', 'expand', 'no-swipes', 'header:#efede4', 'bg:#efede4', 'back:hide', 'haptic:success']));
 });
 
 test('settings inside Telegram: BackButton, Google Health opens in the external browser, limits', async ({ page }) => {
   const app = await asMiniApp(page);
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Браслет: Google Health' })).toBeVisible();
-  await expect(page.getByText('привязан', { exact: false })).toBeVisible();
+  await expect(page.getByText(/^привязан \d/)).toBeVisible();
   await expect(page.getByLabel('агент пишет в день, до')).toHaveValue('6');
   await page.getByRole('button', { name: 'Подключить Google Health' }).click();
   await expect.poll(app.calls).toEqual(expect.arrayContaining(['back:show', 'open:https://accounts.google.com/o/oauth2/v2/auth?client_id=test']));

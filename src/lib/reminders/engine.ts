@@ -16,7 +16,7 @@ type Rule = {
   priority: number; cooldown_minutes: number; once_per_day: boolean; deep_link: string;
 };
 
-export type TickReport = { userId: string; considered: number; sent: string[]; skipped: Record<string, string>; delivered: number; errors: string[] };
+export type TickReport = { userId: string; considered: number; sent: string[]; skipped: Record<string, string>; delivered: number; errors: string[]; facts?: Facts };
 
 /** The rule whose message asks «ate anything?» with its own buttons. */
 const FOOD_CHECK_RULE = 'no_food_5h';
@@ -89,6 +89,7 @@ async function tickUser(admin: SupabaseClient, userId: string, now: Date, send: 
   const { data: rules } = await admin.from('reminder_rules').select('*').eq('user_id', userId).eq('enabled', true).order('sort_order');
   if (!rules?.length) return report;
   const { facts, summary } = await computeFacts(admin, userId, profile, now);
+  if (opts.preview) report.facts = facts;
   const state = await limitState(admin, userId, summary.day, now);
   let today = state.today;
   let botSentAt = state.botSentAt;
