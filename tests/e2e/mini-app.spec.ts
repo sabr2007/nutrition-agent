@@ -7,7 +7,10 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 const USER_ID = '00000000-0000-4000-8000-0000000000aa';
 const MEAL_ID = '00000000-0000-4000-8000-0000000000m1'.replace('m1', 'b1');
 const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-const jwt = () => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: USER_ID, aud: 'authenticated', role: 'authenticated', email: 'owner@example.test', exp: Math.floor(Date.now() / 1000) + 3600 })}.c2ln`;
+const jwt = (n = 0) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: USER_ID, aud: 'authenticated', role: 'authenticated', email: 'owner@example.test', exp: Math.floor(Date.now() / 1000) + 3600, n })}.c2ln`;
+
+// The worker would fetch /api/today itself, past these mocks.
+test.use({ serviceWorkers: 'block' });
 
 const goal = { id: 'g1', name: 'Челлендж', kind: 'phase', starts_on: '2026-11-20', ends_on: null, kcal_min: 1650, kcal_max: 1800, kcal_floor: 1500, protein_min_g: 180, protein_max_g: 200, fat_min_g: 40, fat_max_g: 50, carbs_min_g: 100, carbs_max_g: 130, steps_min: 10000 };
 const meal = {
@@ -98,4 +101,96 @@ test('«Ещё» keeps the old chat and log only as a fallback entry', async ({ 
   await page.goto('/more');
   await expect(page.getByText('запасной вход', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: /Старый чат/ })).toBeVisible();
+});
+
+// D32: in Telegram's webview on the Mac the stored session vanished five seconds after sign-in;
+// the two screens that then got 401 signed in twice at once, one sign-in died on the server and
+// its error stayed on screen although the other one had succeeded.
+test.describe('sign-in survives Telegram’s webview', () => {
+  const trends = { weight: { points: [], avg7_change_kg: null }, waist_cm: [] };
+  const nav = (page: Page) => page.getByRole('navigation', { name: 'Основная навигация' });
+
+  /** Sign-ins: the listed statuses first (500 = a server error), then success with a new token each time. */
+  async function signInServer(page: Page, plan: number[] = []) {
+    const issued: string[] = [];
+    let calls = 0;
+    await page.route('**/api/telegram/auth', (r) => {
+      const status = plan[calls++] ?? 200;
+      if (status !== 200) return r.fulfill({ status, json: { error: { message: 'Что-то пошло не так. Попробуй ещё раз.', code: 'internal' } } });
+      const token = jwt(calls);
+      issued.push(token);
+      return r.fulfill({ json: { access_token: token, refresh_token: `refresh-${calls}`, expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, token_type: 'bearer', user: { id: USER_ID, email: 'owner@example.test' } } });
+    });
+    return { calls: () => calls, issued };
+  }
+
+  /** /api/today and /api/report as the server answers them: 401 without a token or with a refused one. */
+  async function apiServer(page: Page) {
+    const refused = new Set<string>();
+    const seen: { path: string; token: string | null; restored: boolean }[] = [];
+    const answer = (body: unknown) => (r: Route) => {
+      const headers = r.request().headers();
+      const token = headers.authorization?.replace(/^Bearer /, '') ?? null;
+      seen.push({ path: new URL(r.request().url()).pathname, token, restored: headers['x-session-restored'] === '1' });
+      if (!token || refused.has(token)) return r.fulfill({ status: 401, json: { error: { message: 'Сессия истекла, войди снова', code: 'invalid_token' } } });
+      return r.fulfill({ json: body });
+    };
+    await page.route('**/api/today**', answer(today));
+    await page.route('**/api/report**', answer(trends));
+    return { seen, refuse: (t: string) => refused.add(t) };
+  }
+
+  test('a session the webview drops from storage still signs requests and is put back', async ({ page }) => {
+    await asMiniApp(page);
+    const auth = await signInServer(page);
+    const api = await apiServer(page);
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: /Обед/ })).toBeVisible();
+
+    await page.evaluate(() => localStorage.removeItem('ryadom-auth'));
+    await nav(page).getByRole('link', { name: /Тело/ }).click();
+    await expect(page.getByRole('heading', { name: 'Замеры' })).toBeVisible();
+    await expect.poll(() => api.seen.filter((s) => s.path === '/api/report')).toEqual([{ path: '/api/report', token: auth.issued[0], restored: true }]);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ryadom-auth') ?? 'null')?.access_token)).toBe(auth.issued[0]);
+    expect(auth.calls()).toBe(1);
+  });
+
+  test('two screens refused at once → one quiet sign-in, no error screen', async ({ page }) => {
+    await asMiniApp(page);
+    const auth = await signInServer(page);
+    const api = await apiServer(page);
+    // The refresh token is refused too — slowly, so the second screen's request is refused while the renewal is under way.
+    await page.route('**/auth/v1/token**', async (r) => { await new Promise((d) => setTimeout(d, 400)); await r.fulfill({ status: 400, json: { error: 'invalid_grant', error_description: 'Invalid Refresh Token' } }); });
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: /Обед/ })).toBeVisible();
+
+    api.refuse(auth.issued[0]);
+    await Promise.all([
+      page.evaluate(() => window.dispatchEvent(new Event('focus'))),
+      nav(page).getByRole('link', { name: /Тело/ }).click(),
+    ]);
+    await expect(page.getByRole('heading', { name: 'Замеры' })).toBeVisible();
+    await expect.poll(() => api.seen.some((s) => s.path === '/api/report' && s.token === auth.issued[1])).toBe(true);
+    expect(auth.calls()).toBe(2);
+    expect(api.seen.filter((s) => s.token === auth.issued[0]).map((s) => s.path)).toEqual(expect.arrayContaining(['/api/today', '/api/report']));
+    await expect(page.getByText('вход через telegram')).toHaveCount(0);
+  });
+
+  test('a server error at sign-in is retried once, quietly', async ({ page }) => {
+    await asMiniApp(page);
+    const auth = await signInServer(page, [500]);
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: /Обед/ })).toBeVisible();
+    expect(auth.calls()).toBe(2);
+  });
+
+  test('a sign-in that keeps failing shows the reason and a retry that works', async ({ page }) => {
+    await asMiniApp(page);
+    const auth = await signInServer(page, [500, 500]);
+    await page.goto('/');
+    await expect(page.getByText('Что-то пошло не так. Попробуй ещё раз.')).toBeVisible();
+    await page.getByRole('button', { name: 'Попробовать ещё раз' }).click();
+    await expect(page.getByRole('button', { name: /Обед/ })).toBeVisible();
+    expect(auth.calls()).toBe(3);
+  });
 });

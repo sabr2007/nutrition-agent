@@ -15,11 +15,21 @@ export type UserCtx = { userId: string; token: string; sb: SupabaseClient };
 export async function requireUser(req: Request): Promise<UserCtx> {
   const header = req.headers.get('authorization') ?? '';
   const token = header.replace(/^Bearer\s+/i, '').trim();
-  if (!token) throw new HttpError(401, 'Нужно войти', 'unauthenticated');
+  const path = new URL(req.url).pathname;
+  // Why a request was refused, and whether the page had to put a lost session back (D32). No token
+  // contents, no user ids.
+  if (req.headers.get('x-session-restored')) console.info('[auth] session restored from page memory', { path });
+  if (!token) {
+    console.warn('[auth] 401', { path, reason: 'no_token' });
+    throw new HttpError(401, 'Нужно войти', 'unauthenticated');
+  }
   const sb = supabaseAsUser(token);
   const { data, error } = await sb.auth.getClaims(token);
   const sub = data?.claims?.sub;
-  if (error || !sub) throw new HttpError(401, 'Сессия истекла, войди снова', 'invalid_token');
+  if (error || !sub) {
+    console.warn('[auth] 401', { path, reason: 'invalid_token', error: error?.name, detail: error?.message?.slice(0, 120) });
+    throw new HttpError(401, 'Сессия истекла, войди снова', 'invalid_token');
+  }
   return { userId: sub, token, sb };
 }
 

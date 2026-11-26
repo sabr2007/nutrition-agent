@@ -7,6 +7,11 @@ import { publicEnv } from '@/lib/env';
 // supabase-js keeps it (localStorage 'ryadom-auth', same shape), so the pages that still query
 // tables directly (settings, body, memory, login) share it. Refreshes take the same Web Lock as
 // supabase-js ('lock:ryadom-auth'), so the two never spend one refresh token twice.
+//
+// The page also keeps its own copy (D32): Telegram's webview on the Mac lost the stored session
+// five seconds after sign-in, with nothing in the app removing it. Storage stays the source of
+// truth when it holds a session (another tab or supabase-js may have refreshed it); when it
+// loses one, the page's copy keeps the visit going and is written back.
 
 export type LiteSession = {
   access_token: string;
@@ -25,7 +30,10 @@ const EARLY_MS = 60_000;
 type Listener = (s: LiteSession | null) => void;
 const listeners = new Set<Listener>();
 
-export function readSession(): LiteSession | null {
+let pageCopy: LiteSession | null = null;
+let restoredFromPage = false;
+
+function readStored(): LiteSession | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
@@ -36,20 +44,45 @@ export function readSession(): LiteSession | null {
   }
 }
 
-export function writeSession(s: LiteSession | null): void {
+function store(s: LiteSession | null): void {
   try {
     if (s) localStorage.setItem(KEY, JSON.stringify(s));
     else localStorage.removeItem(KEY);
   } catch {
-    // storage unavailable: the session lives for this page only
+    // storage unavailable: the page's copy carries the visit
   }
+}
+
+export function readSession(): LiteSession | null {
+  const stored = readStored();
+  if (stored && (!pageCopy || stored.expires_at >= pageCopy.expires_at)) {
+    pageCopy = stored;
+    return stored;
+  }
+  if (pageCopy && !stored) {
+    restoredFromPage = true;
+    store(pageCopy); // supabase-js (body, settings) reads storage directly
+  }
+  return pageCopy;
+}
+
+/** True once this page had to put a lost session back (sent to the API as a diagnostic). */
+export const sessionRestored = (): boolean => restoredFromPage;
+
+export function writeSession(s: LiteSession | null): void {
+  pageCopy = s;
+  store(s);
   for (const l of listeners) l(s);
 }
 
 /** Changes from this tab (writeSession) and from others (storage events). */
 export function onSession(l: Listener): () => void {
   listeners.add(l);
-  const onStorage = (e: StorageEvent) => { if (e.key === KEY) l(readSession()); };
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== KEY) return;
+    if (e.newValue === null) pageCopy = null; // another tab signed out: so does this one
+    l(readSession());
+  };
   window.addEventListener('storage', onStorage);
   return () => { listeners.delete(l); window.removeEventListener('storage', onStorage); };
 }
@@ -61,17 +94,22 @@ async function withLock<T>(fn: () => Promise<T>): Promise<T> {
 
 const fresh = (s: LiteSession) => s.expires_at * 1000 - Date.now() > EARLY_MS;
 
-async function refresh(): Promise<LiteSession | null> {
+/**
+ * Trades the refresh token for a new session. `force` refreshes even a token that looks fresh
+ * (the API just refused it), unless another caller already replaced it while we waited.
+ */
+async function refresh(force = false, staleToken?: string): Promise<LiteSession | null> {
   return withLock(async () => {
     const cur = readSession(); // another tab or supabase-js may have refreshed while we waited
-    if (!cur || fresh(cur)) return cur;
+    if (!cur) return null;
+    if (force ? cur.access_token !== staleToken : fresh(cur)) return cur;
     let res: Response;
     try {
       res = await fetch(`${publicEnv.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
         method: 'POST', headers: { apikey: publicEnv.supabasePublishableKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: cur.refresh_token }),
       });
     } catch {
-      return cur; // offline: keep the session, the request will tell
+      return force ? null : cur; // offline: keep the session, the request will tell
     }
     if (!res.ok) {
       if (res.status === 400 || res.status === 401) writeSession(null); // the grant is gone
@@ -93,4 +131,9 @@ export async function accessToken(): Promise<string | null> {
   if (fresh(s)) return s.access_token;
   refreshing ??= refresh().finally(() => { refreshing = null; });
   return (await refreshing)?.access_token ?? null;
+}
+
+/** After the API refused `staleToken`: a refreshed session, or null when the grant is gone. */
+export function refreshAfterRejection(staleToken: string): Promise<LiteSession | null> {
+  return refresh(true, staleToken);
 }

@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser, accessToken } from '@/lib/supabase/browser';
 import { api, fetcher } from '@/lib/client/api';
+import { writeSession } from '@/lib/client/session';
 import { useSession } from '@/components/auth/AuthGate';
 import { useToast } from '@/components/ui/Toast';
 import { enablePush, pushState, type PushState } from '@/lib/client/push';
@@ -193,7 +194,7 @@ export default function SettingsPage() {
           <input type="password" autoComplete="new-password" placeholder="Повтори пароль" value={pwd.b} onChange={(e) => setPwd({ ...pwd, b: e.target.value })} className="w-full rounded-xl border border-rule bg-paper px-3 py-3" />
           <button onClick={changePassword} className="press w-full rounded-full border border-ink py-3">Сменить пароль</button>
           <button onClick={exportData} className="press w-full rounded-full border border-rule py-3">Экспорт всех данных (ZIP с CSV)</button>
-          <button onClick={async () => { await sb.auth.signOut(); if ('caches' in window) { for (const k of await caches.keys()) if (k.startsWith('data-')) await caches.delete(k); } router.replace('/login'); }} className="press w-full py-2 text-sm text-over">Выйти</button>
+          <button onClick={async () => { await sb.auth.signOut(); writeSession(null); if ('caches' in window) { for (const k of await caches.keys()) if (k.startsWith('data-')) await caches.delete(k); } router.replace('/login'); }} className="press w-full py-2 text-sm text-over">Выйти</button>
         </div>
       </Section>
     </main>
